@@ -29,9 +29,17 @@
 		(display (call/cc (lambda (k) (+ 1 (k 99)))))
 
 		(display (let loop ((i 1) (acc 0)) (if (> i 10) acc (loop (+ i 1) (+ acc i)))))
+		(newline)
 		(display (do ((i 0 (+ i 1)) (s 0 (+ s i))) ((= i 5) s)))
+		(newline)
 		(define a 7)
-		(display `(answer ,(* a 6)))
+		(write `(answer ,(* a 6)))
+		(newline)
+		(display (map (lambda (x) (* x x)) (list 1 2 3 4)))
+		(newline)
+		(display (apply + (list 1 2 3 4 5)))
+		(newline)
+		(write (string-append "char=" (number->string (char->integer #\A))))
 	</script>
 </body>
 

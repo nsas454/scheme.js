@@ -85,15 +85,27 @@ console.log(scheme('(define (f x) (* x x)) (f 9)'));// 81
 | `begin` | `(begin (display 1) (display 2))` |
 | `quote` | `(quote (1 2 3))` / `'(1 2 3)` |
 | `quasiquote` | `` `(x ,a ,@lst) `` / `(quasiquote ...)`(準クオート) |
+| `delay` | `(delay (+ 1 2))`(遅延評価。`force` で実体化) |
 | `define-macro` | `(define-macro (when t body) (list 'if t body 0))` |
 
 ### 主な組み込み手続き
 
-- 算術・比較: `+` `-` `*` `/` `=` `<` `>` `<=` `>=`
-- リスト: `car` `cdr` `cons` `list` `append` `length` `null?` `pair?`
-- その他: `eq?` `not` `display`
-- 継続: `call/cc` / `call-with-current-continuation`
-- 定数: `#t` `#f` `nil`
+R5RS の標準手続きを幅広くサポートしています。
+
+- 算術: `+` `-` `*` `/` `abs` `min` `max` `quotient` `remainder` `modulo` `gcd` `lcm` `floor` `ceiling` `round` `truncate` `sqrt` `expt` `exp` `log` `sin` `cos` `tan` `asin` `acos` `atan`
+- 数値述語/変換: `number?` `integer?` `real?` `zero?` `positive?` `negative?` `odd?` `even?` `exact?` `inexact?` `number->string` `string->number` `exact->inexact` ほか
+- 比較: `=` `<` `>` `<=` `>=`
+- 等価性: `eq?` `eqv?` `equal?`
+- リスト: `car` `cdr` `cons` `list` `append` `length` `reverse` `list-ref` `list-tail` `member`/`memq`/`memv` `assoc`/`assq`/`assv` `caar`〜`cadddr` `set-car!` `set-cdr!` `null?` `pair?` `list?`
+- 高階: `map` `for-each` `apply`
+- 述語: `boolean?` `symbol?` `string?` `char?` `vector?` `procedure?` `not`
+- 文字: `char->integer` `integer->char` `char=?` `char<?` … `char-upcase` `char-downcase` `char-alphabetic?` `char-numeric?` `char-whitespace?`
+- 文字列: `string?` `string-length` `string-ref` `substring` `string-append` `string->list` `list->string` `string->symbol` `symbol->string` `string=?` `string<?` … `make-string` `string`
+- ベクタ: `vector` `make-vector` `vector-ref` `vector-set!` `vector-length` `vector->list` `list->vector` `vector-fill!`
+- 制御: `call/cc` / `call-with-current-continuation` `values` `call-with-values` `dynamic-wind` `delay`/`force` `eval` `apply`
+- 入出力: `display` `write` `newline` `write-char` `write-string`
+- その他: `error` `interaction-environment`
+- リテラル: 真偽値 `#t` `#f`、文字 `#\a` `#\space` `#\newline` ほか
 
 ## 例
 
@@ -181,10 +193,24 @@ console.log(scheme('(define (f x) (* x x)) (f 9)'));// 81
 (saved 10)                                       ; => 110
 ```
 
-## 制限事項
+## R5RS 対応状況
 
-- 継続は意味論的に完全ですが、`dynamic-wind` は未実装です。
-- 末尾呼び出しはトランポリンによりスタック安全ですが、数値計算は JavaScript の数値(浮動小数点)を使います。
+R5RS の機能を段階的に取り込んでいます。多くの標準手続き・特殊形式・データ型(文字・文字列・ベクタ・真偽値)に対応済みですが、以下はまだ未対応/簡易対応です。
+
+未対応・今後対応予定:
+
+- **衛生的マクロ `define-syntax` / `syntax-rules`**(現状は非衛生的な `define-macro` のみ)
+- **完全な数値タワー**(有理数・複素数、exact/inexact の厳密な区別)。現状は JavaScript の数値(倍精度浮動小数点)で近似
+- **ポートと本格的な I/O**(`read` `open-input-file` など。出力系は `display`/`write`/`newline` のみ)
+- **本物のペア(cons セル)とドット対 `(a . b)`**。リストは JavaScript 配列で表現しているため、`set-cdr!` は簡易対応で、シンボルと文字列の内部表現が一部重なります(`symbol?`/`string?` の区別に制限あり)
+
+簡易対応:
+
+- `dynamic-wind` は通常完了時に `after` を実行しますが、継続による脱出/再入をまたぐ場合の `after`/`before` 実行には未対応です。
+
+備考:
+
+- 末尾呼び出しはトランポリン + CPS により実質的にスタック安全(末尾位置の再帰は定数スタック)です。
 
 ## ライセンス
 
