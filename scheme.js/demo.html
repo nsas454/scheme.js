@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+	<meta charset="utf-8">
+	<title>scheme.js demo</title>
+</head>
+
+<body>
+	<h1>scheme.js demo</h1>
+	<p>下の枠に &lt;script type="text/scheme"&gt; の (display ...) の出力が表示されます。</p>
+	<pre id="scheme-output" style="background:#111;color:#0f0;padding:1em;"></pre>
+
+	<!-- インタプリタ本体 -->
+	<script src="schemInp.js"></script>
+
+	<!-- Scheme コードを直接書いて実行 -->
+	<script type="text/scheme">
+		(display "hello from scheme")
+		(display (+ 1 2 3))
+
+		(define (make-adder n) (lambda (x) (+ x n)))
+		(define add5 (make-adder 5))
+		(display (add5 10))
+
+		(define-macro (when test body) (list 'if test body 0))
+		(display (when (eq? 1 1) 42))
+
+		(display (call/cc (lambda (k) (+ 1 (k 99)))))
+
+		(display (let loop ((i 1) (acc 0)) (if (> i 10) acc (loop (+ i 1) (+ acc i)))))
+		(display (do ((i 0 (+ i 1)) (s 0 (+ s i))) ((= i 5) s)))
+		(define a 7)
+		(display `(answer ,(* a 6)))
+	</script>
+</body>
+
+</html>
