@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>scheme.js REPL</title>
+	<style>
+		:root {
+			--bg: #0d1117;
+			--panel: #161b22;
+			--border: #30363d;
+			--text: #c9d1d9;
+			--muted: #8b949e;
+			--prompt: #58a6ff;
+			--out: #7ee787;
+			--value: #ffa657;
+			--error: #ff7b72;
+			--accent: #238636;
+		}
+
+		* { box-sizing: border-box; }
+
+		body {
+			margin: 0;
+			min-height: 100vh;
+			font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+			background: var(--bg);
+			color: var(--text);
+		}
+
+		header {
+			padding: 1rem 1.25rem;
+			border-bottom: 1px solid var(--border);
+			background: var(--panel);
+		}
+
+		header h1 {
+			margin: 0 0 0.35rem;
+			font-size: 1.1rem;
+			font-weight: 600;
+		}
+
+		header p {
+			margin: 0;
+			font-size: 0.8rem;
+			color: var(--muted);
+		}
+
+		main {
+			max-width: 960px;
+			margin: 0 auto;
+			padding: 1rem;
+		}
+
+		#repl-root {
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			background: #010409;
+			overflow: hidden;
+			min-height: 70vh;
+			display: flex;
+			flex-direction: column;
+		}
+
+		/* scheme_repl_ui が生成する要素 */
+		.scheme-repl {
+			display: flex;
+			flex-direction: column;
+			flex: 1;
+			min-height: 70vh;
+		}
+
+		.scheme-repl-transcript {
+			flex: 1;
+			margin: 0;
+			padding: 1rem;
+			overflow: auto;
+			white-space: pre-wrap;
+			word-break: break-word;
+			font-size: 0.9rem;
+			line-height: 1.5;
+		}
+
+		.scheme-repl-meta { color: var(--muted); }
+		.scheme-repl-prompt-echo { color: var(--prompt); }
+		.scheme-repl-input-echo { color: var(--text); }
+		.scheme-repl-out { color: var(--out); }
+		.scheme-repl-value { color: var(--value); }
+		.scheme-repl-error { color: var(--error); }
+
+		.scheme-repl-input-row {
+			display: flex;
+			align-items: flex-start;
+			gap: 0.5rem;
+			padding: 0.75rem 1rem;
+			border-top: 1px solid var(--border);
+			background: var(--panel);
+		}
+
+		.scheme-repl-prompt {
+			color: var(--prompt);
+			padding-top: 0.35rem;
+			user-select: none;
+			flex-shrink: 0;
+		}
+
+		.scheme-repl-input {
+			flex: 1;
+			resize: none;
+			border: none;
+			outline: none;
+			background: transparent;
+			color: var(--text);
+			font: inherit;
+			line-height: 1.5;
+			min-height: 1.5em;
+			padding: 0.35rem 0;
+		}
+
+		.scheme-repl-toolbar {
+			display: flex;
+			gap: 0.5rem;
+			padding: 0.5rem 1rem 0.75rem;
+			border-top: 1px solid var(--border);
+			background: var(--panel);
+		}
+
+		.scheme-repl-toolbar button {
+			font: inherit;
+			font-size: 0.8rem;
+			padding: 0.35rem 0.85rem;
+			border-radius: 6px;
+			border: 1px solid var(--border);
+			background: #21262d;
+			color: var(--text);
+			cursor: pointer;
+		}
+
+		.scheme-repl-toolbar button:first-child {
+			background: var(--accent);
+			border-color: #2ea043;
+			color: #fff;
+		}
+
+		.scheme-repl-toolbar button:hover {
+			filter: brightness(1.08);
+		}
+
+		.examples {
+			margin-top: 1rem;
+			font-size: 0.8rem;
+			color: var(--muted);
+		}
+
+		.examples code {
+			color: var(--out);
+			cursor: pointer;
+		}
+
+		.examples code:hover {
+			text-decoration: underline;
+		}
+	</style>
+</head>
+
+<body>
+	<header>
+		<h1>scheme.js REPL</h1>
+		<p>ブラウザ上で Scheme を対話的に実行できます。定義はセッション中保持されます。</p>
+	</header>
+
+	<main>
+		<div id="repl-root"></div>
+		<p class="examples">
+			例:
+			<code data-snippet="(+ 1 2 3)">(+ 1 2 3)</code> ·
+			<code data-snippet="(define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 10)">階乗</code> ·
+			<code data-snippet="(map (lambda (x) (* x x)) (list 1 2 3 4))">map</code> ·
+			<code data-snippet="(* 3+4i 1+2i)">複素数</code>
+		</p>
+	</main>
+
+	<script src="schemInp.js"></script>
+	<script>
+		var repl = scheme_repl_ui(document.getElementById('repl-root'));
+
+		document.querySelectorAll('.examples code').forEach(function (el) {
+			el.addEventListener('click', function () {
+				var input = repl.getInput();
+				input.value = el.getAttribute('data-snippet');
+				input.focus();
+				input.dispatchEvent(new Event('input'));
+			});
+		});
+	</script>
+</body>
+
+</html>

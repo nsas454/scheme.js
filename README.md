@@ -42,7 +42,34 @@ JavaScript で実装した Scheme インタプリタです。
 
 動作確認用の `scheme.js/demo.html` を用意しています。ブラウザで開くと実行結果が表示されます。
 
-### 2. ブラウザ: JavaScript の関数として実行する
+### 2. ブラウザ: REPL UI で対話実行する
+
+`scheme.js/repl.html` をブラウザで開くと、ターミナル風の REPL で Scheme を対話的に実行できます。
+
+- **Enter** — 式を実行(括弧が閉じていなければ複数行入力に続行)
+- **Shift+Enter** — 改行
+- **↑ / ↓** — 入力履歴
+- `define` などの定義はセッション中保持されます
+
+```html
+<script src="scheme.js/schemInp.js"></script>
+<div id="my-repl"></div>
+<script>
+  scheme_repl_ui(document.getElementById('my-repl'));
+</script>
+```
+
+プログラムから 1 式ずつ評価する API も利用できます。
+
+```js
+var res = scheme_repl_eval('(+ 1 2)');
+// res.ok === true, res.value === 3, res.output === '' (display の出力)
+// res.error === null
+```
+
+> `file://` で開いても REPL は動作します(外部ファイル読み込みは不要)。
+
+### 3. ブラウザ: JavaScript の関数として実行する
 
 `schemInp.js` を読み込むと、グローバルに `scheme()` 関数が定義されます。文字列で渡したコードを評価し、最後の式の結果を返します。
 
@@ -54,7 +81,7 @@ JavaScript で実装した Scheme インタプリタです。
 </script>
 ```
 
-### 3. Node.js から使う
+### 4. Node.js から使う
 
 ```js
 const { scheme } = require('./scheme.js/schemInp.js');
@@ -326,6 +353,7 @@ R5RS の機能を段階的に取り込んでいます。多くの標準手続き
 - **複素数**(`3+4i` / `+i` / `2i` などのリテラル、`make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/`angle`、四則演算、`(sqrt -1) → i`、超越関数 `exp`/`log`/`sin`/`cos`/`tan`/`asin`/`acos`/`atan`/`expt` の複素数引数)
 - **I/O ポート**(文字列ポート `open-input-string`/`open-output-string`/`get-output-string`、`read`/`read-char`/`peek-char`/`read-line`、`call-with-output-string`/`with-output-to-string`、`display`/`write`/`newline` 等のポート引数。ファイルポート `open-input-file`/`open-output-file`/`call-with-input-file`/`call-with-output-file`/`with-output-to-file`/`with-input-from-file` は **Node.js のみ**)
 - **対話的 stdin(Node.js)**。既定の入力ポートが標準入力に接続され、`(read)` / `(read-line)` / `(eval (read))` が利用可能。`node schemInp.js` または `scheme_repl()` で REPL 起動
+- **ブラウザ REPL UI**(`repl.html` / `scheme_repl_ui()` / `scheme_repl_eval()`)。ターミナル風の対話実行、履歴、複数行入力
 - **本物のペア(cons セル)**。実行時のリストデータは本物の `Pair`(cons セル)で表現し、空リストは `'()`(= `null`)。ドット対 `(a . b)` / 不完全リスト `(a b . c)` の読み取り・表示、`set-car!`/`set-cdr!` による破壊的変更と構造共有、`eq?` によるペアの同一性、循環リストに安全な `list?`/表示、可変長引数 `(lambda args ...)` / `(define (f a . rest) ...)` に対応
 - **シンボルのインターン化**(`(eq? 'a 'a)` ・ `(symbol? 'a)` が正しく動作)
 - **`;` 行コメント**
