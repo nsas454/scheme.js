@@ -87,6 +87,8 @@ console.log(scheme('(define (f x) (* x x)) (f 9)'));// 81
 | `quasiquote` | `` `(x ,a ,@lst) `` / `(quasiquote ...)`(準クオート) |
 | `delay` | `(delay (+ 1 2))`(遅延評価。`force` で実体化) |
 | `define-macro` | `(define-macro (when t body) (list 'if t body 0))` |
+| `define-syntax` / `syntax-rules` | `(define-syntax swap! (syntax-rules () ((_ a b) ...)))` |
+| `let-syntax` / `letrec-syntax` | `(let-syntax ((m (syntax-rules ...))) ...)` |
 
 ### 主な組み込み手続き
 
@@ -176,9 +178,129 @@ R5RS の標準手続きを幅広くサポートしています。
 ### マクロ
 
 ```scheme
+;; Lisp 風マクロ (define-macro)
 (define-macro (when test body)
   (list 'if test body 0))
 (when (eq? 1 1) 42) ; => 42
+
+;; パターンマッチに基づくマクロ (define-syntax / syntax-rules)
+(define-syntax swap!
+  (syntax-rules ()
+    ((_ a b) (let ((tmp a)) (set! a b) (set! b tmp)))))
+(define x 1) (define y 2)
+(swap! x y) (list x y) ; => (2 1)
+
+;; エリプシス (...) で可変長パターン
+(define-syntax my-and
+  (syntax-rules ()
+    ((_) #t)
+    ((_ e) e)
+    ((_ e1 e2 ...) (if e1 (my-and e2 ...) #f))))
+(my-and 1 2 3)   ; => 3
+
+;; リテラル識別子
+(define-syntax arrow
+  (syntax-rules (=>)
+    ((_ a => b) (+ a b))
+    ((_ a b)    (* a b))))
+(arrow 3 => 4)   ; => 7
+```
+
+### 数値タワー
+
+```scheme
+(* 1000000000000 1000000000000) ; => 1000000000000000000000000 (多倍長・exact)
+(/ 1 3)                         ; => 1/3   (有理数)
+(+ 1/3 1/6)                     ; => 1/2
+(exact? 3)                      ; => #t
+(inexact? 3.0)                  ; => #t
+(+ 1 2.0)                       ; => 3.    (inexact が伝播)
+(inexact->exact 0.5)            ; => 1/2
+(sqrt 16)                       ; => 4     (完全平方数は exact)
+(expt 2 -2)                     ; => 1/4
+#xff                            ; => 255   (基数接頭辞)
+```
+
+### 本物のペア(cons セル)
+
+```scheme
+(cons 1 2)            ; => (1 . 2)   (ドット対)
+'(1 2 . 3)            ; => (1 2 . 3) (不完全リスト)
+(pair? (cons 1 2))    ; => #t
+(eq? (cons 1 2) (cons 1 2)) ; => #f  (別インスタンス)
+
+;; 破壊的変更と構造共有
+(define p (cons 'x 'y))
+(set-cdr! p 'z)
+p                     ; => (x . z)
+
+;; 可変長引数(ドット仮引数)
+(define (sum . xs) (apply + xs))
+(sum 1 2 3 4 5)       ; => 15
+
+;; インターンされたシンボル
+(eq? 'foo 'foo)       ; => #t
+(symbol? 'foo)        ; => #t
+```
+
+### 複素数
+
+```scheme
+(* 3+4i 1+2i)              ; => -5+10i
+(+ 1+2i 1-2i)             ; => 2        (実数へ正規化)
+(/ 1+2i 1+1i)             ; => 3/2+1/2i (exact のまま)
+(magnitude 3+4i)          ; => 5.
+(real-part 3+4i)          ; => 3
+(imag-part 3+4i)          ; => 4
+(make-rectangular 3 4)    ; => 3+4i
+(sqrt -1)                 ; => i
+(expt +i 2)               ; => -1
+(exp +i)                  ; => 0.5403+0.8415i  (オイラーの公式)
+(sin (make-rectangular 1 2)) ; => 3.1658+1.9596i
+(log -1)                  ; => 3.1416i (主値)
+```
+
+### 対話 REPL(Node.js)
+
+```bash
+node scheme.js/schemInp.js
+# または
+node -e "require('./scheme.js/schemInp.js').scheme_repl()"
+```
+
+```scheme
+> (+ 1 2 3)
+6
+> (eval (read))   ; 次の行の S 式を読み込んで評価
+```
+
+パイプからの利用:
+
+```bash
+echo "(+ 1 2)" | node -e "var S=require('./scheme.js/schemInp.js'); console.log(S.repr(S.scheme('(eval (read))')))"
+; => 3
+```
+
+### I/O ポート
+
+```scheme
+;; 出力文字列ポート
+(call-with-output-string
+  (lambda (p) (display "x=" p) (write (+ 20 22) p))) ; => "x=42"
+
+;; 入力文字列ポートと read
+(define ip (open-input-string "(+ 1 2 3) hello"))
+(eval (read ip))   ; => 6
+(read ip)          ; => hello
+
+;; read-char / read-line
+(define cp (open-input-string "ab\ncd"))
+(read-char cp)     ; => #\a
+(read-line cp)     ; => "b"
+
+;; ファイルポート(Node.js のみ)
+(call-with-output-file "out.txt" (lambda (p) (display "hello" p)))
+(call-with-input-file  "out.txt" (lambda (p) (read-line p)))  ; => "hello"
 ```
 
 ### 継続(call/cc)
@@ -197,15 +319,24 @@ R5RS の標準手続きを幅広くサポートしています。
 
 R5RS の機能を段階的に取り込んでいます。多くの標準手続き・特殊形式・データ型(文字・文字列・ベクタ・真偽値)に対応済みですが、以下はまだ未対応/簡易対応です。
 
-未対応・今後対応予定:
+対応済み:
 
-- **衛生的マクロ `define-syntax` / `syntax-rules`**(現状は非衛生的な `define-macro` のみ)
-- **完全な数値タワー**(有理数・複素数、exact/inexact の厳密な区別)。現状は JavaScript の数値(倍精度浮動小数点)で近似
-- **ポートと本格的な I/O**(`read` `open-input-file` など。出力系は `display`/`write`/`newline` のみ)
-- **本物のペア(cons セル)とドット対 `(a . b)`**。リストは JavaScript 配列で表現しているため、`set-cdr!` は簡易対応で、シンボルと文字列の内部表現が一部重なります(`symbol?`/`string?` の区別に制限あり)
+- **マクロ `define-syntax` / `syntax-rules`**(リテラル・エリプシス `...`・入れ子パターン・`let-syntax`/`letrec-syntax` に対応)
+- **数値タワー**(`exact` な多倍長整数 / 有理数、`inexact` な浮動小数、**複素数**。`exact?`/`inexact?`/`exact->inexact`/`inexact->exact`、有理数演算、基数接頭辞 `#x`/`#o`/`#b`/`#d`、正確さ接頭辞 `#e`/`#i`、`#e1.5 → 3/2` など)
+- **複素数**(`3+4i` / `+i` / `2i` などのリテラル、`make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/`angle`、四則演算、`(sqrt -1) → i`、超越関数 `exp`/`log`/`sin`/`cos`/`tan`/`asin`/`acos`/`atan`/`expt` の複素数引数)
+- **I/O ポート**(文字列ポート `open-input-string`/`open-output-string`/`get-output-string`、`read`/`read-char`/`peek-char`/`read-line`、`call-with-output-string`/`with-output-to-string`、`display`/`write`/`newline` 等のポート引数。ファイルポート `open-input-file`/`open-output-file`/`call-with-input-file`/`call-with-output-file`/`with-output-to-file`/`with-input-from-file` は **Node.js のみ**)
+- **対話的 stdin(Node.js)**。既定の入力ポートが標準入力に接続され、`(read)` / `(read-line)` / `(eval (read))` が利用可能。`node schemInp.js` または `scheme_repl()` で REPL 起動
+- **本物のペア(cons セル)**。実行時のリストデータは本物の `Pair`(cons セル)で表現し、空リストは `'()`(= `null`)。ドット対 `(a . b)` / 不完全リスト `(a b . c)` の読み取り・表示、`set-car!`/`set-cdr!` による破壊的変更と構造共有、`eq?` によるペアの同一性、循環リストに安全な `list?`/表示、可変長引数 `(lambda args ...)` / `(define (f a . rest) ...)` に対応
+- **シンボルのインターン化**(`(eq? 'a 'a)` ・ `(symbol? 'a)` が正しく動作)
+- **`;` 行コメント**
 
 簡易対応:
 
+- 複素数の `log`/`asin`/`acos`/`atan` は**主値**(principal value)を返します。`(log -1)` は `i*pi` 相当です。
+- 対話的 stdin は **Node.js のみ**(ブラウザでは stdin なし = EOF)。TTY では `char-ready?` は常に `#t` になり得ます(ブロック読み取り)。
+
+- `syntax-rules` の健全性(hygiene)は簡易対応です。パターン変数は正しく扱いますが、テンプレートが導入する束縛変数の自動改名(完全な変数捕捉回避)は限定的です。
+- 内部の AST(コード)は JavaScript 配列のままで、`quote`/`quasiquote`/`eval` の境界で配列↔ペアを相互変換しています(ユーザが操作するリストデータは常に本物の cons セル)。
 - `dynamic-wind` は通常完了時に `after` を実行しますが、継続による脱出/再入をまたぐ場合の `after`/`before` 実行には未対応です。
 
 備考:

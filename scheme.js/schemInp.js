@@ -33,24 +33,88 @@ var TAG_NUM = 2;
 // ------------------------------------------------------------------
 // 基本のリスト操作 (リストは JavaScript の配列で表現する)
 // ------------------------------------------------------------------
-var car = function (list) {
-	return list[0];
+// 本物のペア(cons セル)。実行時のリストデータはすべてこの Pair で表す。
+// 空リスト '() は JavaScript の null。内部 AST(コード)は従来どおり配列。
+function Pair(a, d) {
+	this.car = a;
+	this.cdr = d;
+}
+
+// car/cdr は「データ(Pair)」と「AST(配列)」の両方を受け付ける(polymorphic)。
+// これにより評価器は配列 AST を従来どおり走査でき、データ操作は Pair で行える。
+var car = function (x) {
+	if (x instanceof Pair) return x.car;
+	if (x == null) return undefined;
+	return x[0];
 };
-var cdr = function (list) {
-	return list.slice(1);
+var cdr = function (x) {
+	if (x instanceof Pair) return x.cdr;
+	if (x == null) return null;
+	return x.slice(1);
 };
-var cadr = function (list) {
-	return car(cdr(list));
+var cadr = function (x) {
+	return car(cdr(x));
 };
 
-// 真のリスト cons: (cons x lst) は lst の先頭に x を足した新しいリストを返す
+// cons は常に本物の Pair を返す(データ構築)
 var cons = function (a, b) {
 	if (arguments.length != 2)
 		throw ("cons requires 2 arguments");
-	if (Array.isArray(b)) return [a].concat(b);
-	if (b == null) return [a];
-	return [a, b];
+	return new Pair(a, b);
 };
+
+// --- リスト/配列 変換ヘルパ --------------------------------------
+// JS 配列 -> Pair リスト(末尾 tail を指定可能。省略時は '() = null)
+function array_to_list(arr, tail) {
+	var lst = (tail === undefined) ? null : tail;
+	for (var i = arr.length - 1; i >= 0; i--) lst = new Pair(arr[i], lst);
+	return lst;
+}
+// Pair リスト -> JS 配列(不完全リストの末尾は無視)
+function list_to_array(lst) {
+	var a = [];
+	while (lst instanceof Pair) { a.push(lst.car); lst = lst.cdr; }
+	return a;
+}
+function list_length(lst) {
+	var n = 0;
+	while (lst instanceof Pair) { n++; lst = lst.cdr; }
+	return n;
+}
+// Pair リスト同士の append(最後の引数以外をコピーして連結する)
+function append_pair(a, b) {
+	if (!(a instanceof Pair)) return b;
+	var arr = list_to_array(a);
+	return array_to_list(arr, b);
+}
+
+// 配列 AST(引用データ)-> 本物の Pair データへ変換(quote/quasiquote 境界)
+function to_datum(d) {
+	if (d === null) return null;
+	if (Array.isArray(d)) {
+		var lst = null;
+		for (var i = d.length - 1; i >= 0; i--) lst = new Pair(to_datum(d[i]), lst);
+		return lst;
+	}
+	if (d instanceof Pair) {           // パーサが生成したドット対(不完全リスト)
+		return new Pair(to_datum(d.car), to_datum(d.cdr));
+	}
+	if (typeof d === 'string') {        // 文字列リテラルの引用符を除去(show_text と同様)
+		return d.replace(/\"/g, '');
+	}
+	return d;                           // Symbol / 数値 / 文字 / 真偽値 等はそのまま
+}
+
+// Pair データ -> 配列 AST へ変換(eval / マクロ展開結果を評価器に渡すため)
+function to_ast(d) {
+	if (d instanceof Pair) {
+		var arr = [];
+		var p = d;
+		while (p instanceof Pair) { arr.push(to_ast(p.car)); p = p.cdr; }
+		return arr;
+	}
+	return d;
+}
 
 var isNumber = function (value) {
 	if (typeof (value) != 'number' && typeof (value) != 'string')
@@ -149,9 +213,29 @@ extend_env = function (parameters, args, env) {
 	if (parameters == null) {
 		return newEnv;
 	}
-	for (var i = 0; i < parameters.length; i++) {
-		var name = (parameters[i] instanceof Symbol) ? parameters[i].name : parameters[i];
-		newEnv.add(name, args[i]);
+	// 可変長: (lambda args ...) のように仮引数が 1 個のシンボル -> 全引数をリストで束縛
+	if (parameters instanceof Symbol) {
+		newEnv.add(parameters.name, array_to_list(args));
+		return newEnv;
+	}
+	// 不完全な仮引数リスト: (lambda (a b . rest) ...) -> rest に残りをリストで束縛
+	if (parameters instanceof Pair) {
+		var p = parameters, i = 0;
+		while (p instanceof Pair) {
+			var nm = (p.car instanceof Symbol) ? p.car.name : p.car;
+			newEnv.add(nm, args[i++]);
+			p = p.cdr;
+		}
+		if (p != null) {
+			var restName = (p instanceof Symbol) ? p.name : p;
+			newEnv.add(restName, array_to_list(args.slice(i)));
+		}
+		return newEnv;
+	}
+	// 通常の仮引数リスト(配列 AST)
+	for (var j = 0; j < parameters.length; j++) {
+		var name = (parameters[j] instanceof Symbol) ? parameters[j].name : parameters[j];
+		newEnv.add(name, args[j]);
 	}
 	return newEnv;
 };
@@ -188,17 +272,8 @@ isquoted = function (exp) {
 };
 
 text_of_quotation = function (exp) {
-	var datum = car(cdr(exp));
-	if (datum instanceof Array) {
-		return datum;
-	}
-	if (datum instanceof Symbol) {
-		return datum.name;
-	}
-	if (typeof datum === "string") {
-		return datum.replace(/\"/g, '');
-	}
-	return datum;
+	// 引用データを「本物の Pair」へ変換して返す(リストは cons セルになる)
+	return to_datum(car(cdr(exp)));
 };
 
 istagged_list = function (exp, tag) {
@@ -316,17 +391,18 @@ var primitive_procedures = {
 	'car': function (args) { return car(args[0]); },
 	'cdr': function (args) { return cdr(args[0]); },
 	'cons': function (args) { return cons(args[0], args[1]); },
-	'list': function (args) { return args.slice(); },
+	'list': function (args) { return array_to_list(args); },
 	'append': function (args) {
-		var ret = [];
-		for (var i = 0; i < args.length; i++) {
-			ret = ret.concat(args[i]);
+		if (args.length === 0) return null;
+		var ret = args[args.length - 1];
+		for (var i = args.length - 2; i >= 0; i--) {
+			ret = append_pair(args[i], ret);
 		}
 		return ret;
 	},
-	'length': function (args) { return args[0] == null ? 0 : args[0].length; },
-	'pair?': function (args) { return Array.isArray(args[0]) && args[0].length > 0; },
-	'null?': function (args) { return args[0] == null || (Array.isArray(args[0]) && args[0].length === 0); },
+	'length': function (args) { return list_length(args[0]); },
+	'pair?': function (args) { return args[0] instanceof Pair; },
+	'null?': function (args) { return args[0] === null; },
 	'not': function (args) { return !isTruthy(args[0]); },
 	'*': function (args) {
 		var ret = 1;
@@ -455,11 +531,15 @@ ispromise = function (p) { return p instanceof Promise; };
 // --- 等価性 -------------------------------------------------------
 function seqv(a, b) {
 	if (a instanceof Char && b instanceof Char) return a.ch === b.ch;
+	if (is_scheme_number(a) && is_scheme_number(b)) return num_eq(a, b);
 	return a === b;
 }
 function sequal(a, b) {
 	if (seqv(a, b)) return true;
 	if (a instanceof Char && b instanceof Char) return a.ch === b.ch;
+	if (a instanceof Pair && b instanceof Pair) {
+		return sequal(a.car, b.car) && sequal(a.cdr, b.cdr);
+	}
 	if (Array.isArray(a) && Array.isArray(b)) {
 		if (a.length !== b.length) return false;
 		for (var i = 0; i < a.length; i++) {
@@ -481,6 +561,9 @@ function scheme_repr(x, writeMode) {
 	if (x === false) return '#f';
 	if (x === undefined) return '';
 	if (x === null) return '()';
+	if (x instanceof Rational) return num_repr(x);
+	if (x instanceof Complex) return num_repr(x);
+	if (typeof x === 'number') return num_repr(x);
 	if (x instanceof Char) return writeMode ? char_repr(x.ch) : x.ch;
 	if (x instanceof Symbol) return x.name;
 	if (x instanceof SVector) {
@@ -495,6 +578,19 @@ function scheme_repr(x, writeMode) {
 		return vs.join(' ');
 	}
 	if (x instanceof Eof) return '#<eof>';
+	if (x instanceof Pair) {
+		var parts = [];
+		var p = x;
+		var seen = [];
+		while (p instanceof Pair) {
+			if (seen.indexOf(p) >= 0) { parts.push('...'); p = null; break; }
+			seen.push(p);
+			parts.push(scheme_repr(p.car, writeMode));
+			p = p.cdr;
+		}
+		if (p === null) return '(' + parts.join(' ') + ')';
+		return '(' + parts.join(' ') + ' . ' + scheme_repr(p, writeMode) + ')';
+	}
 	if (Array.isArray(x)) {
 		if (isprimitive_procedure(x) || iscompound_procedure(x)) return '#<procedure>';
 		if (iscontinuation(x)) return '#<continuation>';
@@ -542,7 +638,18 @@ var R5RS_PRIMITIVES = {
 	'string?': function (args) { return typeof args[0] === 'string'; },
 	'vector?': function (args) { return args[0] instanceof SVector; },
 	'number?': function (args) { return typeof args[0] === 'number'; },
-	'list?': function (args) { return args[0] == null || Array.isArray(args[0]); },
+	'list?': function (args) {
+		var slow = args[0], fast = args[0];
+		while (true) {
+			if (fast === null) return true;
+			if (!(fast instanceof Pair)) return false;
+			fast = fast.cdr;
+			if (fast === null) return true;
+			if (!(fast instanceof Pair)) return false;
+			fast = fast.cdr; slow = slow.cdr;
+			if (fast === slow) return false; // 循環リスト
+		}
+	},
 	'procedure?': function (args) {
 		var p = args[0];
 		return isprimitive_procedure(p) || iscompound_procedure(p) || iscontinuation(p);
@@ -606,25 +713,19 @@ var R5RS_PRIMITIVES = {
 	'cddar': function (args) { return cdr(cdr(car(args[0]))); },
 	'cdddr': function (args) { return cdr(cdr(cdr(args[0]))); },
 	'cadddr': function (args) { return car(cdr(cdr(cdr(args[0])))); },
-	'list-ref': function (args) { return args[0][args[1]]; },
-	'list-tail': function (args) { return args[0].slice(args[1]); },
-	'reverse': function (args) { return args[0] == null ? null : args[0].slice().reverse(); },
-	'last-pair': function (args) { var l = args[0]; return l.slice(l.length - 1); },
-	'list-copy': function (args) { return args[0] == null ? null : args[0].slice(); },
-	'member': function (args) { var l = args[1] || []; for (var i = 0; i < l.length; i++) if (sequal(args[0], l[i])) return l.slice(i); return false; },
-	'memq': function (args) { var l = args[1] || []; for (var i = 0; i < l.length; i++) if (seqv(args[0], l[i])) return l.slice(i); return false; },
-	'memv': function (args) { var l = args[1] || []; for (var i = 0; i < l.length; i++) if (seqv(args[0], l[i])) return l.slice(i); return false; },
-	'assoc': function (args) { var l = args[1] || []; for (var i = 0; i < l.length; i++) if (sequal(args[0], car(l[i]))) return l[i]; return false; },
-	'assq': function (args) { var l = args[1] || []; for (var i = 0; i < l.length; i++) if (seqv(args[0], car(l[i]))) return l[i]; return false; },
-	'assv': function (args) { var l = args[1] || []; for (var i = 0; i < l.length; i++) if (seqv(args[0], car(l[i]))) return l[i]; return false; },
-	'set-car!': function (args) { args[0][0] = args[1]; return undefined; },
-	'set-cdr!': function (args) {
-		var l = args[0], nt = args[1];
-		l.length = 1;
-		if (Array.isArray(nt)) { for (var i = 0; i < nt.length; i++) l.push(nt[i]); }
-		else if (nt != null) { l.push(nt); }
-		return undefined;
-	},
+	'list-ref': function (args) { var p = args[0], n = to_jsint(args[1]); while (n-- > 0) p = p.cdr; return p.car; },
+	'list-tail': function (args) { var p = args[0], n = to_jsint(args[1]); while (n-- > 0) p = p.cdr; return p; },
+	'reverse': function (args) { var p = args[0], r = null; while (p instanceof Pair) { r = new Pair(p.car, r); p = p.cdr; } return r; },
+	'last-pair': function (args) { var p = args[0]; if (!(p instanceof Pair)) return p; while (p.cdr instanceof Pair) p = p.cdr; return p; },
+	'list-copy': function (args) { return append_pair(args[0], null); },
+	'member': function (args) { var l = args[1]; while (l instanceof Pair) { if (sequal(args[0], l.car)) return l; l = l.cdr; } return false; },
+	'memq': function (args) { var l = args[1]; while (l instanceof Pair) { if (seqv(args[0], l.car)) return l; l = l.cdr; } return false; },
+	'memv': function (args) { var l = args[1]; while (l instanceof Pair) { if (seqv(args[0], l.car)) return l; l = l.cdr; } return false; },
+	'assoc': function (args) { var l = args[1]; while (l instanceof Pair) { if (l.car instanceof Pair && sequal(args[0], l.car.car)) return l.car; l = l.cdr; } return false; },
+	'assq': function (args) { var l = args[1]; while (l instanceof Pair) { if (l.car instanceof Pair && seqv(args[0], l.car.car)) return l.car; l = l.cdr; } return false; },
+	'assv': function (args) { var l = args[1]; while (l instanceof Pair) { if (l.car instanceof Pair && seqv(args[0], l.car.car)) return l.car; l = l.cdr; } return false; },
+	'set-car!': function (args) { args[0].car = args[1]; return undefined; },
+	'set-cdr!': function (args) { args[0].cdr = args[1]; return undefined; },
 
 	// シンボル / 文字列
 	'symbol->string': function (args) { return (args[0] instanceof Symbol) ? args[0].name : String(args[0]); },
@@ -639,8 +740,8 @@ var R5RS_PRIMITIVES = {
 	'string>?': function (args) { return String(args[0]) > String(args[1]); },
 	'string<=?': function (args) { return String(args[0]) <= String(args[1]); },
 	'string>=?': function (args) { return String(args[0]) >= String(args[1]); },
-	'string->list': function (args) { var s = String(args[0]); var r = []; for (var i = 0; i < s.length; i++) r.push(new Char(s.charAt(i))); return r.length ? r : null; },
-	'list->string': function (args) { var l = args[0] || []; var s = ''; for (var i = 0; i < l.length; i++) s += (l[i] instanceof Char ? l[i].ch : String(l[i])); return s; },
+	'string->list': function (args) { var s = String(args[0]); var r = null; for (var i = s.length - 1; i >= 0; i--) r = new Pair(new Char(s.charAt(i)), r); return r; },
+	'list->string': function (args) { var l = args[0]; var s = ''; while (l instanceof Pair) { s += (l.car instanceof Char ? l.car.ch : String(l.car)); l = l.cdr; } return s; },
 	'make-string': function (args) { var n = args[0]; var c = args[1] instanceof Char ? args[1].ch : ' '; var s = ''; for (var i = 0; i < n; i++) s += c; return s; },
 	'string': function (args) { var s = ''; for (var i = 0; i < args.length; i++) s += (args[i] instanceof Char ? args[i].ch : String(args[i])); return s; },
 	'string-upcase': function (args) { return String(args[0]).toUpperCase(); },
@@ -668,8 +769,8 @@ var R5RS_PRIMITIVES = {
 	'vector-ref': function (args) { return args[0].items[args[1]]; },
 	'vector-set!': function (args) { args[0].items[args[1]] = args[2]; return undefined; },
 	'vector-length': function (args) { return args[0].items.length; },
-	'vector->list': function (args) { return args[0].items.length ? args[0].items.slice() : null; },
-	'list->vector': function (args) { return new SVector(args[0] == null ? [] : args[0].slice()); },
+	'vector->list': function (args) { return array_to_list(args[0].items); },
+	'list->vector': function (args) { return new SVector(list_to_array(args[0])); },
 	'vector-fill!': function (args) { var v = args[0].items; for (var i = 0; i < v.length; i++) v[i] = args[1]; return undefined; },
 
 	// 出力
@@ -704,7 +805,7 @@ var prim_apply = function (args, k) {
 	var proc = args[0];
 	var fixed = args.slice(1, args.length - 1);
 	var last = args[args.length - 1];
-	var all = fixed.concat(last == null ? [] : (Array.isArray(last) ? last : [last]));
+	var all = fixed.concat(last == null ? [] : (last instanceof Pair ? list_to_array(last) : [last]));
 	return s_apply(proc, all, k);
 };
 prim_apply.cps = true;
@@ -712,17 +813,18 @@ prim_apply.cps = true;
 // (map proc list1 list2 ...)
 var prim_map = function (args, k) {
 	var proc = args[0];
-	var lists = args.slice(1);
+	var lists = [];
 	var n = Infinity;
-	for (var i = 0; i < lists.length; i++) {
-		var len = lists[i] == null ? 0 : lists[i].length;
-		if (len < n) n = len;
+	for (var i = 1; i < args.length; i++) {
+		var arr = list_to_array(args[i]);
+		lists.push(arr);
+		if (arr.length < n) n = arr.length;
 	}
 	if (n === Infinity) n = 0;
 	var result = [];
 	var loop = function (idx) {
 		if (idx >= n) {
-			return bounce(function () { return k(result.length ? result : null); });
+			return bounce(function () { return k(array_to_list(result)); });
 		}
 		var tuple = [];
 		for (var j = 0; j < lists.length; j++) tuple.push(lists[j][idx]);
@@ -738,11 +840,12 @@ prim_map.cps = true;
 // (for-each proc list1 ...)
 var prim_for_each = function (args, k) {
 	var proc = args[0];
-	var lists = args.slice(1);
+	var lists = [];
 	var n = Infinity;
-	for (var i = 0; i < lists.length; i++) {
-		var len = lists[i] == null ? 0 : lists[i].length;
-		if (len < n) n = len;
+	for (var i = 1; i < args.length; i++) {
+		var arr = list_to_array(args[i]);
+		lists.push(arr);
+		if (arr.length < n) n = arr.length;
 	}
 	if (n === Infinity) n = 0;
 	var loop = function (idx) {
@@ -803,7 +906,8 @@ prim_force.cps = true;
 
 // (eval expr [env])
 var prim_eval = function (args, k) {
-	var expr = args[0];
+	// データ(Pair)をコード(配列 AST)へ変換してから評価する
+	var expr = to_ast(args[0]);
 	var env = (args.length > 1 && args[1] instanceof Env) ? args[1] : theGlobalEnv;
 	return seval(expr, env, k);
 };
@@ -824,6 +928,751 @@ R5RS_PRIMITIVES['eval'] = prim_eval;
 		primitive_procedures[name] = R5RS_PRIMITIVES[name];
 	}
 })();
+
+// ==================================================================
+// 数値タワー
+//   exact: Rational(多倍長有理数。整数は分母 1)  /  inexact: JavaScript の number(浮動小数)
+//   complex: Complex(実部・虚部はそれぞれ実数)。虚部が exact 0 なら実数へ正規化。
+// ==================================================================
+function Rational(n, d) { this.n = n; this.d = d; } // n,d は BigInt(正規化済み・d>0)
+
+function big_abs(a) { return a < 0n ? -a : a; }
+function big_gcd(a, b) { a = big_abs(a); b = big_abs(b); while (b) { var t = b; b = a % b; a = t; } return a; }
+function make_rat(n, d) {
+	if (d === 0n) throw 'division by zero';
+	if (d < 0n) { n = -n; d = -d; }
+	var g = big_gcd(n, d);
+	if (g > 1n) { n = n / g; d = d / g; }
+	return new Rational(n, d);
+}
+function exact_int(bi) { return new Rational(bi, 1n); }
+
+function is_exact(x) { return x instanceof Rational; }
+function is_inexact(x) { return typeof x === 'number'; }
+function is_scheme_number(x) { return is_exact(x) || is_inexact(x) || (x instanceof Complex); }
+function ck_num(x, who) { if (!is_scheme_number(x)) throw ((who || 'number') + ': not a number: ' + scheme_repr(x, true)); return x; }
+
+function rat_to_float(r) { return Number(r.n) / Number(r.d); }
+function to_float(x) { return is_exact(x) ? rat_to_float(x) : x; }
+function to_jsint(x) { return is_exact(x) ? Number(x.n / x.d) : Math.trunc(x); }
+function num_is_integer(x) { return is_exact(x) ? (x.d === 1n) : (typeof x === 'number' && isFinite(x) && Math.floor(x) === x); }
+
+function float_to_exact(x) {
+	if (!isFinite(x)) throw 'cannot convert to exact: ' + x;
+	if (Number.isInteger(x)) return exact_int(BigInt(x));
+	var s = x.toString();
+	if (s.indexOf('e') >= 0 || s.indexOf('E') >= 0) { s = x.toFixed(20).replace(/0+$/, ''); }
+	var neg = false;
+	if (s.charAt(0) === '-') { neg = true; s = s.slice(1); }
+	var dot = s.indexOf('.');
+	if (dot < 0) { var bi = BigInt(s); return exact_int(neg ? -bi : bi); }
+	var digits = s.length - dot - 1;
+	var n = BigInt(s.replace('.', ''));
+	if (neg) n = -n;
+	return make_rat(n, 10n ** BigInt(digits));
+}
+function to_exact(x) { return is_exact(x) ? x : float_to_exact(x); }
+
+// --- 実数(exact 有理数 / inexact 浮動小数)演算 ---
+function real_add(a, b) { if (is_exact(a) && is_exact(b)) return make_rat(a.n * b.d + b.n * a.d, a.d * b.d); return to_float(a) + to_float(b); }
+function real_sub(a, b) { if (is_exact(a) && is_exact(b)) return make_rat(a.n * b.d - b.n * a.d, a.d * b.d); return to_float(a) - to_float(b); }
+function real_mul(a, b) { if (is_exact(a) && is_exact(b)) return make_rat(a.n * b.n, a.d * b.d); return to_float(a) * to_float(b); }
+function real_div(a, b) {
+	if (is_exact(a) && is_exact(b)) { if (b.n === 0n) throw 'division by zero'; return make_rat(a.n * b.d, a.d * b.n); }
+	return to_float(a) / to_float(b);
+}
+function real_neg(a) { return is_exact(a) ? new Rational(-a.n, a.d) : -a; }
+function real_num_eq(a, b) {
+	if (is_exact(a) && is_exact(b)) return a.n === b.n && a.d === b.d;
+	if (is_inexact(a) && is_inexact(b)) return a === b;
+	if (is_exact(a) && is_inexact(b)) return rat_to_float(a) === b;
+	if (is_inexact(a) && is_exact(b)) return a === rat_to_float(b);
+	return false;
+}
+function is_real_zero(x) { return (is_exact(x) && x.n === 0n) || (is_inexact(x) && x === 0); }
+
+// --- 複素数 ---
+function Complex(re, im) { this.re = re; this.im = im; } // re, im は実数(Rational または number)
+function is_complex(x) { return x instanceof Complex; }
+function is_real_num(x) { return is_exact(x) || is_inexact(x); }
+// 浮動小数のごく小さい値を 0 とみなす(複素数演算の丸め誤差対策)
+function scrub_tiny(x) {
+	if (typeof x === 'number' && Math.abs(x) < 1e-14) return 0;
+	return x;
+}
+// 虚部が 0 なら実数に正規化する
+function make_complex(re, im) {
+	re = scrub_tiny(re); im = scrub_tiny(im);
+	if (is_real_zero(im) || (typeof im === 'number' && im === 0)) return re;
+	return new Complex(re, im);
+}
+function cplx_re(x) { return is_complex(x) ? x.re : x; }
+function cplx_im(x) { return is_complex(x) ? x.im : exact_int(0n); }
+function complex_magnitude(x) { var r = to_float(cplx_re(x)), i = to_float(cplx_im(x)); return Math.sqrt(r * r + i * i); }
+function complex_angle(x) { return Math.atan2(to_float(cplx_im(x)), to_float(cplx_re(x))); }
+
+// 複素数の超越関数(inexact 結果)
+function complex_exp(z) {
+	var a = to_float(cplx_re(z)), b = to_float(cplx_im(z));
+	var ea = Math.exp(a);
+	return make_complex(ea * Math.cos(b), ea * Math.sin(b));
+}
+function complex_log(z) {
+	var m = complex_magnitude(z);
+	if (m === 0) throw 'log: undefined for 0';
+	return make_complex(Math.log(m), complex_angle(z)); // 主値
+}
+function complex_sin(z) {
+	var a = to_float(cplx_re(z)), b = to_float(cplx_im(z));
+	return make_complex(Math.sin(a) * Math.cosh(b), Math.cos(a) * Math.sinh(b));
+}
+function complex_cos(z) {
+	var a = to_float(cplx_re(z)), b = to_float(cplx_im(z));
+	return make_complex(Math.cos(a) * Math.cosh(b), -Math.sin(a) * Math.sinh(b));
+}
+function complex_tan(z) { return n_div(complex_sin(z), complex_cos(z)); }
+// asin(z) = -i * log(i*z + sqrt(1 - z^2))
+function complex_asin(z) {
+	var iz = make_complex(n_neg(cplx_im(z)), cplx_re(z)); // i*z
+	var one = exact_int(1n);
+	var inner = n_add(iz, complex_sqrt(n_sub(one, n_mul(z, z))));
+	return n_mul(make_complex(exact_int(0n), exact_int(-1n)), complex_log(inner));
+}
+function complex_acos(z) {
+	// acos(z) = pi/2 - asin(z)
+	var halfPi = Math.PI / 2;
+	return n_sub(make_complex(halfPi, 0), complex_asin(z));
+}
+function complex_atan(z) {
+	// atan(z) = i/2 * log((i+z)/(i-z))
+	var i = make_complex(exact_int(0n), exact_int(1n));
+	var num = n_add(i, z);
+	var den = n_sub(i, z);
+	return n_mul(make_complex(0, 0.5), complex_log(n_div(num, den)));
+}
+function complex_sqrt(z) {
+	var m = complex_magnitude(z);
+	if (m === 0) return make_complex(exact_int(0n), exact_int(0n));
+	var a = complex_angle(z) / 2;
+	var sm = Math.sqrt(m);
+	return make_complex(sm * Math.cos(a), sm * Math.sin(a));
+}
+function complex_expt(base, ex) {
+	// base^ex = exp(ex * log(base))  (主値)
+	if (is_complex(ex) || is_complex(base)) {
+		return complex_exp(n_mul(ex, complex_log(base)));
+	}
+	// 実数指数は polar 形式
+	var m = complex_magnitude(base), a = complex_angle(base);
+	var e = to_float(ex);
+	return make_complex(Math.pow(m, e) * Math.cos(a * e), Math.pow(m, e) * Math.sin(a * e));
+}
+
+// --- 複素数対応の算術ディスパッチ ---
+function n_add(a, b) {
+	if (is_complex(a) || is_complex(b)) return make_complex(real_add(cplx_re(a), cplx_re(b)), real_add(cplx_im(a), cplx_im(b)));
+	return real_add(a, b);
+}
+function n_sub(a, b) {
+	if (is_complex(a) || is_complex(b)) return make_complex(real_sub(cplx_re(a), cplx_re(b)), real_sub(cplx_im(a), cplx_im(b)));
+	return real_sub(a, b);
+}
+function n_mul(a, b) {
+	if (is_complex(a) || is_complex(b)) {
+		var ar = cplx_re(a), ai = cplx_im(a), br = cplx_re(b), bi = cplx_im(b);
+		return make_complex(real_sub(real_mul(ar, br), real_mul(ai, bi)), real_add(real_mul(ar, bi), real_mul(ai, br)));
+	}
+	return real_mul(a, b);
+}
+function n_div(a, b) {
+	if (is_complex(a) || is_complex(b)) {
+		var ar = cplx_re(a), ai = cplx_im(a), br = cplx_re(b), bi = cplx_im(b);
+		var den = real_add(real_mul(br, br), real_mul(bi, bi));
+		return make_complex(real_div(real_add(real_mul(ar, br), real_mul(ai, bi)), den),
+			real_div(real_sub(real_mul(ai, br), real_mul(ar, bi)), den));
+	}
+	return real_div(a, b);
+}
+function n_neg(a) { if (is_complex(a)) return make_complex(real_neg(a.re), real_neg(a.im)); return real_neg(a); }
+function n_cmp(a, b) {
+	if (is_complex(a) || is_complex(b)) throw 'cannot order complex numbers';
+	if (is_exact(a) && is_exact(b)) { var l = a.n * b.d, r = b.n * a.d; return l < r ? -1 : (l > r ? 1 : 0); }
+	var x = to_float(a), y = to_float(b); return x < y ? -1 : (x > y ? 1 : 0);
+}
+function num_eq(a, b) {
+	if (is_complex(a) || is_complex(b)) return real_num_eq(cplx_re(a), cplx_re(b)) && real_num_eq(cplx_im(a), cplx_im(b));
+	if (is_exact(a) && is_exact(b)) return a.n === b.n && a.d === b.d;
+	if (is_inexact(a) && is_inexact(b)) return a === b;
+	return false; // exact と inexact は eqv? 的には非同値
+}
+
+function big_pow(base, e) { var r = 1n; while (e > 0n) { if (e & 1n) r *= base; base *= base; e >>= 1n; } return r; }
+function big_floordiv(n, d) { var q = n / d, r = n % d; if (r !== 0n && (r < 0n)) q -= 1n; return q; }
+
+// 数値の表示
+function num_repr(x) {
+	if (is_exact(x)) return x.d === 1n ? x.n.toString() : (x.n.toString() + '/' + x.d.toString());
+	if (typeof x === 'number') {
+		if (Number.isNaN(x)) return '+nan.0';
+		if (x === Infinity) return '+inf.0';
+		if (x === -Infinity) return '-inf.0';
+		if (Number.isInteger(x)) return x.toString() + '.';
+		return x.toString();
+	}
+	if (x instanceof Complex) return complex_repr(x);
+	return String(x);
+}
+function complex_repr(x) {
+	var reZero = is_real_zero(x.re);
+	var out = reZero ? '' : num_repr(x.re);
+	var imv = to_float(x.im);
+	var imStr;
+	if (imv === 1) imStr = '+i';
+	else if (imv === -1) imStr = '-i';
+	else { imStr = num_repr(x.im); if (imStr.charAt(0) !== '-' && imStr.charAt(0) !== '+') imStr = '+' + imStr; imStr += 'i'; }
+	if (reZero && imStr.charAt(0) === '+') imStr = imStr.slice(1);
+	return out + imStr;
+}
+
+// 文字列を数値に変換(数値でなければ null)。リーダと string->number で共用。
+function parse_number(token) {
+	if (token === '' || token == null) return null;
+	var radix = 10, exactness = null, t = token;
+	// 接頭辞 #e #i #x #o #b #d
+	while (t.length >= 2 && t.charAt(0) === '#') {
+		var p = t.charAt(1).toLowerCase();
+		if (p === 'e') exactness = 'e';
+		else if (p === 'i') exactness = 'i';
+		else if (p === 'x') radix = 16;
+		else if (p === 'o') radix = 8;
+		else if (p === 'b') radix = 2;
+		else if (p === 'd') radix = 10;
+		else return null;
+		t = t.slice(2);
+	}
+	var result = parse_complex_token(t, radix);
+	if (result === null) return null;
+	if (exactness === 'i') return apply_exactness(result, to_float);
+	if (exactness === 'e') return apply_exactness(result, to_exact);
+	return result;
+}
+
+function apply_exactness(x, conv) {
+	if (x instanceof Complex) return make_complex(conv(x.re), conv(x.im));
+	return conv(x);
+}
+
+// 実数 1 個をパース(整数 / 有理数 / 小数 / inf / nan / 基数指定)。数値でなければ null。
+function parse_real_token(t, radix) {
+	if (t === '+inf.0') return Infinity;
+	if (t === '-inf.0') return -Infinity;
+	if (t === '+nan.0' || t === '-nan.0') return NaN;
+	if (radix === 10) {
+		if (/^[+-]?\d+\/\d+$/.test(t)) {
+			var parts = t.replace('+', '').split('/');
+			return make_rat(BigInt(parts[0]), BigInt(parts[1]));
+		}
+		if (/^[+-]?\d+$/.test(t)) return exact_int(BigInt(t));
+		if (/^[+-]?(\d+\.\d*|\.\d+|\d+)(e[+-]?\d+)?$/i.test(t) && /[.e]/i.test(t)) return Number(t);
+		return null;
+	}
+	var re = { 16: /^[+-]?[0-9a-fA-F]+$/, 8: /^[+-]?[0-7]+$/, 2: /^[+-]?[01]+$/ }[radix];
+	if (re && re.test(t)) {
+		var neg = t.charAt(0) === '-';
+		var body = t.replace(/^[+-]/, '');
+		var v = 0n, R = BigInt(radix);
+		for (var i = 0; i < body.length; i++) v = v * R + BigInt(parseInt(body.charAt(i), radix));
+		return exact_int(neg ? -v : v);
+	}
+	return null;
+}
+
+// 複素数(末尾 i)または実数をパース。
+function parse_complex_token(t, radix) {
+	if (t.charAt(t.length - 1) !== 'i') return parse_real_token(t, radix); // 実数
+	if (t === 'i') return null;   // 単独の i はシンボル
+	var bodyAll = t.slice(0, -1); // 末尾 i を除く
+	// 虚部の符号位置を探す(先頭以外、かつ指数 e の直後でない + / -)
+	var split = -1;
+	for (var i = bodyAll.length - 1; i > 0; i--) {
+		var c = bodyAll.charAt(i);
+		if ((c === '+' || c === '-')) {
+			var prev = bodyAll.charAt(i - 1).toLowerCase();
+			if (prev === 'e') continue;
+			split = i; break;
+		}
+	}
+	var reStr, imStr;
+	if (split < 0) { reStr = null; imStr = bodyAll; }       // 純虚数 (例: 4i, +4i, -i)
+	else { reStr = bodyAll.slice(0, split); imStr = bodyAll.slice(split); }
+	// 虚部の単位 (+i / -i / i)
+	var imNum;
+	if (imStr === '' || imStr === '+') imNum = exact_int(1n);
+	else if (imStr === '-') imNum = exact_int(-1n);
+	else { imNum = parse_real_token(imStr, radix); if (imNum === null) return null; }
+	var reNum;
+	if (reStr === null) reNum = exact_int(0n);
+	else { reNum = parse_real_token(reStr, radix); if (reNum === null) return null; }
+	return make_complex(reNum, imNum);
+}
+
+// --- 数値プリミティブ(既存の算術系を上書き) ----------------------
+var NUMERIC_PRIMITIVES = {
+	'+': function (args) { var r = exact_int(0n); for (var i = 0; i < args.length; i++) r = n_add(r, ck_num(args[i], '+')); return r; },
+	'*': function (args) { var r = exact_int(1n); for (var i = 0; i < args.length; i++) r = n_mul(r, ck_num(args[i], '*')); return r; },
+	'-': function (args) {
+		if (args.length === 0) throw "'-' requires at least 1 argument.";
+		if (args.length === 1) return n_neg(ck_num(args[0], '-'));
+		var r = ck_num(args[0], '-');
+		for (var i = 1; i < args.length; i++) r = n_sub(r, ck_num(args[i], '-'));
+		return r;
+	},
+	'/': function (args) {
+		if (args.length === 0) throw "'/' requires at least 1 argument.";
+		if (args.length === 1) return n_div(exact_int(1n), ck_num(args[0], '/'));
+		var r = ck_num(args[0], '/');
+		for (var i = 1; i < args.length; i++) r = n_div(r, ck_num(args[i], '/'));
+		return r;
+	},
+	'=': function (args) { for (var i = 1; i < args.length; i++) if (!num_eq(ck_num(args[i - 1], '='), ck_num(args[i], '='))) return false; return true; },
+	'<': function (args) { for (var i = 1; i < args.length; i++) if (!(n_cmp(args[i - 1], args[i]) < 0)) return false; return true; },
+	'>': function (args) { for (var i = 1; i < args.length; i++) if (!(n_cmp(args[i - 1], args[i]) > 0)) return false; return true; },
+	'<=': function (args) { for (var i = 1; i < args.length; i++) if (!(n_cmp(args[i - 1], args[i]) <= 0)) return false; return true; },
+	'>=': function (args) { for (var i = 1; i < args.length; i++) if (!(n_cmp(args[i - 1], args[i]) >= 0)) return false; return true; },
+
+	'abs': function (args) { var x = ck_num(args[0], 'abs'); return is_exact(x) ? new Rational(big_abs(x.n), x.d) : Math.abs(x); },
+	'min': function (args) { var m = ck_num(args[0], 'min'), inx = is_inexact(m); for (var i = 1; i < args.length; i++) { var a = ck_num(args[i], 'min'); if (is_inexact(a)) inx = true; if (n_cmp(a, m) < 0) m = a; } return inx ? to_float(m) : m; },
+	'max': function (args) { var m = ck_num(args[0], 'max'), inx = is_inexact(m); for (var i = 1; i < args.length; i++) { var a = ck_num(args[i], 'max'); if (is_inexact(a)) inx = true; if (n_cmp(a, m) > 0) m = a; } return inx ? to_float(m) : m; },
+	'quotient': function (args) { var a = args[0], b = args[1]; if (is_exact(a) && is_exact(b)) { if (b.n === 0n) throw 'division by zero'; return exact_int(a.n / b.n); } return Math.trunc(to_float(a) / to_float(b)); },
+	'remainder': function (args) { var a = args[0], b = args[1]; if (is_exact(a) && is_exact(b)) { if (b.n === 0n) throw 'division by zero'; return exact_int(a.n % b.n); } var af = to_float(a), bf = to_float(b); return af - Math.trunc(af / bf) * bf; },
+	'modulo': function (args) { var a = args[0], b = args[1]; if (is_exact(a) && is_exact(b)) { if (b.n === 0n) throw 'division by zero'; return exact_int(((a.n % b.n) + b.n) % b.n); } var af = to_float(a), bf = to_float(b); return ((af % bf) + bf) % bf; },
+	'gcd': function (args) { if (args.length === 0) return exact_int(0n); var g = big_abs(to_exact(args[0]).n); for (var i = 1; i < args.length; i++) g = big_gcd(g, to_exact(args[i]).n); return exact_int(g); },
+	'lcm': function (args) { if (args.length === 0) return exact_int(1n); var l = big_abs(to_exact(args[0]).n); for (var i = 1; i < args.length; i++) { var b = big_abs(to_exact(args[i]).n); l = (l === 0n || b === 0n) ? 0n : (l / big_gcd(l, b)) * b; } return exact_int(l); },
+	'floor': function (args) { var x = ck_num(args[0], 'floor'); return is_exact(x) ? exact_int(big_floordiv(x.n, x.d)) : Math.floor(x); },
+	'ceiling': function (args) { var x = ck_num(args[0], 'ceiling'); return is_exact(x) ? exact_int(-big_floordiv(-x.n, x.d)) : Math.ceil(x); },
+	'truncate': function (args) { var x = ck_num(args[0], 'truncate'); return is_exact(x) ? exact_int(x.n / x.d) : Math.trunc(x); },
+	'round': function (args) {
+		var x = ck_num(args[0], 'round');
+		if (is_inexact(x)) { var r = Math.round(x); if (Math.abs(x - Math.trunc(x)) === 0.5 && r % 2 !== 0) r -= Math.sign(x); return r; }
+		var f = big_floordiv(x.n, x.d); var rem = x.n - f * x.d; var twice = rem * 2n;
+		if (twice < x.d) return exact_int(f);
+		if (twice > x.d) return exact_int(f + 1n);
+		return exact_int((f % 2n === 0n) ? f : f + 1n);
+	},
+	'sqrt': function (args) {
+		var x = ck_num(args[0], 'sqrt');
+		if (is_complex(x)) return complex_sqrt(x);
+		if (is_exact(x) && x.d === 1n && x.n >= 0n) { var r = BigInt(Math.floor(Math.sqrt(Number(x.n)))); for (var k = r - 1n; k <= r + 1n; k++) { if (k >= 0n && k * k === x.n) return exact_int(k); } }
+		var f = to_float(x);
+		if (f < 0) return make_complex(0, Math.sqrt(-f));
+		return Math.sqrt(f);
+	},
+	'expt': function (args) {
+		var base = ck_num(args[0], 'expt'), ex = ck_num(args[1], 'expt');
+		if (is_complex(base) || is_complex(ex)) {
+			// 複素数底・整数指数は正確な繰り返し乗算を優先
+			if (is_complex(base) && is_exact(ex) && ex.d === 1n && !is_complex(ex)) {
+				var e = ex.n, neg = e < 0n; if (neg) e = -e;
+				var acc = exact_int(1n); for (var bi = 0n; bi < e; bi++) acc = n_mul(acc, base);
+				return neg ? n_div(exact_int(1n), acc) : acc;
+			}
+			return complex_expt(base, ex);
+		}
+		if (is_exact(base) && is_exact(ex) && ex.d === 1n) {
+			if (ex.n >= 0n) return make_rat(big_pow(base.n, ex.n), big_pow(base.d, ex.n));
+			var e2 = -ex.n; return make_rat(big_pow(base.d, e2), big_pow(base.n, e2));
+		}
+		var bf = to_float(base);
+		if (bf < 0 && !Number.isInteger(to_float(ex))) return complex_expt(base, ex); // 負底・非整数指数 -> 複素数
+		return Math.pow(bf, to_float(ex));
+	},
+	'exp': function (args) { var x = ck_num(args[0], 'exp'); return is_complex(x) ? complex_exp(x) : Math.exp(to_float(x)); },
+	'log': function (args) {
+		if (args.length > 1) {
+			var base = ck_num(args[1], 'log');
+			if (is_complex(args[0]) || is_complex(base)) return n_div(complex_log(ck_num(args[0], 'log')), complex_log(base));
+			return Math.log(to_float(args[0])) / Math.log(to_float(base));
+		}
+		var x = ck_num(args[0], 'log');
+		if (is_complex(x)) return complex_log(x);
+		if (to_float(x) < 0) return complex_log(make_complex(x, exact_int(0n))); // 負の実数 -> 主値
+		return Math.log(to_float(x));
+	},
+	'sin': function (args) { var x = ck_num(args[0], 'sin'); return is_complex(x) ? complex_sin(x) : Math.sin(to_float(x)); },
+	'cos': function (args) { var x = ck_num(args[0], 'cos'); return is_complex(x) ? complex_cos(x) : Math.cos(to_float(x)); },
+	'tan': function (args) { var x = ck_num(args[0], 'tan'); return is_complex(x) ? complex_tan(x) : Math.tan(to_float(x)); },
+	'asin': function (args) { var x = ck_num(args[0], 'asin'); return is_complex(x) ? complex_asin(x) : Math.asin(to_float(x)); },
+	'acos': function (args) { var x = ck_num(args[0], 'acos'); return is_complex(x) ? complex_acos(x) : Math.acos(to_float(x)); },
+	'atan': function (args) {
+		if (args.length > 1) return Math.atan2(to_float(args[0]), to_float(args[1])); // 2引数は実数
+		var x = ck_num(args[0], 'atan');
+		return is_complex(x) ? complex_atan(x) : Math.atan(to_float(x));
+	},
+	'exact->inexact': function (args) { return apply_exactness(ck_num(args[0], 'exact->inexact'), to_float); },
+	'inexact->exact': function (args) { return apply_exactness(ck_num(args[0], 'inexact->exact'), to_exact); },
+	'exact': function (args) { return apply_exactness(ck_num(args[0], 'exact'), to_exact); },
+	'inexact': function (args) { return apply_exactness(ck_num(args[0], 'inexact'), to_float); },
+	'number->string': function (args) { return num_repr(ck_num(args[0], 'number->string')); },
+	'string->number': function (args) { var r = parse_number(String(args[0])); return r === null ? false : r; },
+	'1+': function (args) { return n_add(ck_num(args[0], '1+'), exact_int(1n)); },
+	'1-': function (args) { return n_sub(ck_num(args[0], '1-'), exact_int(1n)); },
+
+	// 複素数
+	'make-rectangular': function (args) { return make_complex(ck_num(args[0], 'make-rectangular'), ck_num(args[1], 'make-rectangular')); },
+	'make-polar': function (args) { var m = to_float(args[0]), a = to_float(args[1]); return make_complex(m * Math.cos(a), m * Math.sin(a)); },
+	'real-part': function (args) { return cplx_re(ck_num(args[0], 'real-part')); },
+	'imag-part': function (args) { return cplx_im(ck_num(args[0], 'imag-part')); },
+	'magnitude': function (args) { var x = ck_num(args[0], 'magnitude'); return is_complex(x) ? complex_magnitude(x) : (is_exact(x) ? new Rational(big_abs(x.n), x.d) : Math.abs(x)); },
+	'angle': function (args) { var x = ck_num(args[0], 'angle'); return is_complex(x) ? complex_angle(x) : (n_cmp(x, exact_int(0n)) < 0 ? Math.PI : (is_exact(x) ? exact_int(0n) : 0)); },
+
+	// 数値述語
+	'number?': function (args) { return is_scheme_number(args[0]); },
+	'complex?': function (args) { return is_scheme_number(args[0]); },
+	'real?': function (args) { return is_real_num(args[0]); },
+	'rational?': function (args) { return is_exact(args[0]) || (is_inexact(args[0]) && isFinite(args[0])); },
+	'integer?': function (args) { return is_real_num(args[0]) && num_is_integer(args[0]); },
+	'exact?': function (args) { return is_exact(args[0]); },
+	'inexact?': function (args) { return is_inexact(args[0]); },
+	'exact-integer?': function (args) { return is_exact(args[0]) && args[0].d === 1n; },
+	'zero?': function (args) { return n_cmp(ck_num(args[0], 'zero?'), exact_int(0n)) === 0; },
+	'positive?': function (args) { return n_cmp(ck_num(args[0], 'positive?'), exact_int(0n)) > 0; },
+	'negative?': function (args) { return n_cmp(ck_num(args[0], 'negative?'), exact_int(0n)) < 0; },
+	'odd?': function (args) { var x = ck_num(args[0], 'odd?'); return is_exact(x) ? (x.n % 2n !== 0n) : (Math.abs(x % 2) === 1); },
+	'even?': function (args) { var x = ck_num(args[0], 'even?'); return is_exact(x) ? (x.n % 2n === 0n) : (x % 2 === 0); },
+
+	// 整数値を JS インデックスとして使う手続き(数値型対応のため上書き)
+	'list-ref': function (args) { var p = args[0], n = to_jsint(args[1]); while (n-- > 0) p = p.cdr; return p.car; },
+	'list-tail': function (args) { var p = args[0], n = to_jsint(args[1]); while (n-- > 0) p = p.cdr; return p; },
+	'length': function (args) { return exact_int(BigInt(list_length(args[0]))); },
+	'make-vector': function (args) { var n = to_jsint(args[0]); var fill = args.length > 1 ? args[1] : exact_int(0n); var a = []; for (var i = 0; i < n; i++) a.push(fill); return new SVector(a); },
+	'vector-ref': function (args) { return args[0].items[to_jsint(args[1])]; },
+	'vector-set!': function (args) { args[0].items[to_jsint(args[1])] = args[2]; return undefined; },
+	'vector-length': function (args) { return exact_int(BigInt(args[0].items.length)); },
+	'string-length': function (args) { return exact_int(BigInt(String(args[0]).length)); },
+	'string-ref': function (args) { return new Char(String(args[0]).charAt(to_jsint(args[1]))); },
+	'substring': function (args) { return String(args[0]).substring(to_jsint(args[1]), to_jsint(args[2])); },
+	'make-string': function (args) { var n = to_jsint(args[0]); var c = args[1] instanceof Char ? args[1].ch : ' '; var s = ''; for (var i = 0; i < n; i++) s += c; return s; },
+	'char->integer': function (args) { return exact_int(BigInt(args[0].ch.charCodeAt(0))); },
+	'integer->char': function (args) { return new Char(String.fromCharCode(to_jsint(args[0]))); },
+
+	// 等価性(数値は数値比較)
+	'eq?': function (args) { return seqv(args[0], args[1]); },
+	'eqv?': function (args) { return seqv(args[0], args[1]); },
+	'equal?': function (args) { return sequal(args[0], args[1]); }
+};
+
+(function () {
+	for (var name in NUMERIC_PRIMITIVES) {
+		primitive_procedures[name] = NUMERIC_PRIMITIVES[name];
+	}
+})();
+
+// ==================================================================
+// I/O ポート
+//   - 文字列ポート: open-input-string / open-output-string / get-output-string
+//   - ファイルポート(Node のみ): open-input-file / open-output-file ほか
+//   - read / read-char / peek-char / read-line / write / display / newline …
+//   display/write/newline/write-char/write-string は省略可能なポート引数を取る。
+// ==================================================================
+function Port(opts) {
+	this.isInput = !!opts.isInput;
+	this.isOutput = !!opts.isOutput;
+	this.kind = opts.kind;                 // 'string' | 'stdout' | 'stdin' | 'file'
+	this.buffer = '';                      // 出力の蓄積
+	this.str = opts.str || '';             // 入力バッファ
+	this.pos = 0;
+	this.closed = false;
+	this.fileName = opts.fileName || null; // ファイル出力先
+}
+function make_string_output_port() { return new Port({ isOutput: true, kind: 'string' }); }
+function make_string_input_port(s) { return new Port({ isInput: true, kind: 'string', str: s }); }
+
+var NODE_FS = (typeof require !== 'undefined') ? (function () { try { return require('fs'); } catch (e) { return null; } })() : null;
+var NODE_STDIN = (typeof process !== 'undefined' && process.stdin && process.stdin.fd !== undefined) ? process.stdin : null;
+var HAS_STDIN = !!(NODE_FS && NODE_STDIN);
+
+// 既定の入出力ポート(stdout / stdin)
+var STDOUT_PORT = new Port({ isOutput: true, kind: 'stdout' });
+var STDIN_PORT = new Port({ isInput: true, kind: HAS_STDIN ? 'stdin' : 'string', str: '' });
+var current_output_port_obj = STDOUT_PORT;
+var current_input_port_obj = STDIN_PORT;
+
+function out_port(arg) { return (arg instanceof Port) ? arg : current_output_port_obj; }
+function in_port(arg) { return (arg instanceof Port) ? arg : current_input_port_obj; }
+
+function port_write_string(port, str) {
+	if (port.closed) throw 'write: port is closed';
+	if (port.kind === 'stdout') { scheme_output(str); return; }
+	port.buffer += str; // 'string' / 'file'(file は close 時にフラッシュ)
+}
+function flush_port(port) {
+	if (port.kind === 'file' && NODE_FS) NODE_FS.writeFileSync(port.fileName, port.buffer);
+}
+
+// --- stdin 同期読み取り(Node.js) ---------------------------------
+function port_input_buffered(port) { return port.pos < port.str.length; }
+
+function stdin_read_byte(port) {
+	if (!HAS_STDIN) return false;
+	try {
+		var buf = Buffer.alloc(1);
+		var n = NODE_FS.readSync(NODE_STDIN.fd, buf, 0, 1, null);
+		if (n <= 0) return false;
+		port.str += buf.toString('utf8', 0, n);
+		return true;
+	} catch (e) {
+		return false;
+	}
+}
+
+function port_input_fill(port) {
+	if (port.kind === 'stdin') return stdin_read_byte(port);
+	return false;
+}
+
+function port_char_ready(port) {
+	if (port_input_buffered(port)) return true;
+	if (port.kind === 'stdin' && HAS_STDIN) {
+		// TTY ではブロック読み取りになるが、REPL 用途では #t を返す
+		if (NODE_STDIN.isTTY) return true;
+		// パイプ入力: 未読データがあるか試す(非ブロック)
+		try {
+			var buf = Buffer.alloc(1);
+			var n = NODE_FS.readSync(NODE_STDIN.fd, buf, 0, 1, null);
+			if (n > 0) { port.str += buf.toString('utf8', 0, n); return true; }
+		} catch (e) { /* ignore */ }
+	}
+	return false;
+}
+
+function port_read_char(port) {
+	if (!port_input_buffered(port) && !port_input_fill(port)) return EOF_OBJECT;
+	return new Char(port.str.charAt(port.pos++));
+}
+
+function port_peek_char(port) {
+	if (!port_input_buffered(port) && !port_input_fill(port)) return EOF_OBJECT;
+	return new Char(port.str.charAt(port.pos));
+}
+
+function port_read_line(port) {
+	var line = '';
+	while (true) {
+		if (!port_input_buffered(port) && !port_input_fill(port)) {
+			return line === '' ? EOF_OBJECT : line;
+		}
+		var ch = port.str.charAt(port.pos++);
+		if (ch === '\n') return line;
+		if (ch !== '\r') line += ch;
+	}
+}
+
+// バッファ先頭(空白を除く)から 1 つの完全な S 式が読めるか判定
+function sexpr_complete_p(s) {
+	var i = 0;
+	while (i < s.length && ' \t\n\r'.indexOf(s.charAt(i)) >= 0) i++;
+	if (i >= s.length) return false;
+	var c = s.charAt(i);
+	// リスト以外のアトム(空白または閉じ括弧まで)
+	if (c !== '(' && c !== '"') {
+		while (i < s.length && ' \t\n\r()'.indexOf(s.charAt(i)) < 0) i++;
+		return i < s.length;
+	}
+	if (c === '"') {
+		i++;
+		var q = false;
+		while (i < s.length) {
+			if (s.charAt(i) === '\\') { i += 2; continue; }
+			if (s.charAt(i) === '"') { q = !q; i++; if (!q) return i <= s.length; continue; }
+			i++;
+		}
+		return false;
+	}
+	// リスト: 括弧の釣り合い(文字列内は無視)
+	var depth = 0;
+	var inStr = false;
+	while (i < s.length) {
+		var ch = s.charAt(i);
+		if (inStr) {
+			if (ch === '\\') { i += 2; continue; }
+			if (ch === '"') inStr = false;
+			i++; continue;
+		}
+		if (ch === '"') { inStr = true; i++; continue; }
+		if (ch === '(') depth++;
+		else if (ch === ')') { depth--; if (depth === 0) return true; }
+		i++;
+	}
+	return false;
+}
+
+// stdin では 1 行(または完全な S 式)が揃うまで読み込む
+function port_ensure_datum(port) {
+	var slice = port.str.slice(port.pos);
+	if (slice.trim() !== '' && sexpr_complete_p(slice)) return true;
+	if (port.kind !== 'stdin') return slice.trim() !== '';
+	while (true) {
+		slice = port.str.slice(port.pos);
+		if (slice.trim() !== '' && sexpr_complete_p(slice)) return true;
+		if (!port_input_fill(port)) return slice.trim() !== '';
+		// 改行が来たら 1 行分として解析を試みる(括弧なしアトム用)
+		if (slice.indexOf('\n') >= 0 && slice.trim() !== '') return true;
+	}
+}
+
+// ポートから 1 つの S 式を read する(データ = 本物の Pair を返す)
+function port_read(port) {
+	while (true) {
+		if (!port_ensure_datum(port)) return EOF_OBJECT;
+		var rest = port.str.slice(port.pos);
+		var tk = new Tokenizer(rest);
+		if (tk.value() === '' || tk.value() == null) {
+			if (!port_input_fill(port)) return EOF_OBJECT;
+			continue;
+		}
+		var ast = parse(tk);
+		port.pos += tk.point;
+		return to_datum(ast);
+	}
+}
+
+var PORT_PRIMITIVES = {
+	// 文字列ポート
+	'open-input-string': function (args) { return make_string_input_port(String(args[0])); },
+	'open-output-string': function (args) { return make_string_output_port(); },
+	'get-output-string': function (args) { return args[0].buffer; },
+
+	// ポート述語
+	'port?': function (args) { return args[0] instanceof Port; },
+	'input-port?': function (args) { return (args[0] instanceof Port) && args[0].isInput; },
+	'output-port?': function (args) { return (args[0] instanceof Port) && args[0].isOutput; },
+	'eof-object': function (args) { return EOF_OBJECT; },
+	'char-ready?': function (args) { return port_char_ready(in_port(args[0])); },
+
+	// 入力
+	'read-char': function (args) { return port_read_char(in_port(args[0])); },
+	'peek-char': function (args) { return port_peek_char(in_port(args[0])); },
+	'read-line': function (args) { return port_read_line(in_port(args[0])); },
+	'read': function (args) { return port_read(in_port(args[0])); },
+
+	// 出力(省略可能なポート引数)
+	'display': function (args) { port_write_string(out_port(args[1]), scheme_repr(args[0], false)); return undefined; },
+	'write': function (args) { port_write_string(out_port(args[1]), scheme_repr(args[0], true)); return undefined; },
+	'newline': function (args) { port_write_string(out_port(args[0]), '\n'); return undefined; },
+	'write-char': function (args) { port_write_string(out_port(args[1]), args[0] instanceof Char ? args[0].ch : String(args[0])); return undefined; },
+	'write-string': function (args) { port_write_string(out_port(args[1]), String(args[0])); return undefined; },
+
+	// 既定ポート
+	'current-output-port': function (args) { return current_output_port_obj; },
+	'current-input-port': function (args) { return current_input_port_obj; },
+
+	// クローズ
+	'close-output-port': function (args) { flush_port(args[0]); args[0].closed = true; return undefined; },
+	'close-input-port': function (args) { args[0].closed = true; return undefined; },
+	'close-port': function (args) { flush_port(args[0]); args[0].closed = true; return undefined; },
+
+	// ファイルポート(Node のみ)
+	'open-input-file': function (args) { if (!NODE_FS) throw 'open-input-file: file ports require Node.js'; return make_string_input_port(NODE_FS.readFileSync(String(args[0]), 'utf8')); },
+	'open-output-file': function (args) { if (!NODE_FS) throw 'open-output-file: file ports require Node.js'; return new Port({ isOutput: true, kind: 'file', fileName: String(args[0]) }); },
+	'file-exists?': function (args) { return NODE_FS ? NODE_FS.existsSync(String(args[0])) : false; }
+};
+
+(function () {
+	for (var name in PORT_PRIMITIVES) {
+		primitive_procedures[name] = PORT_PRIMITIVES[name];
+	}
+})();
+
+// --- CPS なポート手続き(thunk/proc を呼ぶため継続を扱う) ---------
+var prim_call_with_output_string = function (args, k) {
+	var proc = args[0];
+	var port = make_string_output_port();
+	return s_apply(proc, [port], function (ignored) {
+		return bounce(function () { return k(port.buffer); });
+	});
+};
+prim_call_with_output_string.cps = true;
+
+var prim_with_output_to_string = function (args, k) {
+	var thunk = args[0];
+	var port = make_string_output_port();
+	var saved = current_output_port_obj;
+	current_output_port_obj = port;
+	return s_apply(thunk, [], function (ignored) {
+		current_output_port_obj = saved;
+		return bounce(function () { return k(port.buffer); });
+	});
+};
+prim_with_output_to_string.cps = true;
+
+var prim_with_input_from_string = function (args, k) {
+	var thunk = args[1];
+	var port = make_string_input_port(String(args[0]));
+	var saved = current_input_port_obj;
+	current_input_port_obj = port;
+	return s_apply(thunk, [], function (result) {
+		current_input_port_obj = saved;
+		return bounce(function () { return k(result); });
+	});
+};
+prim_with_input_from_string.cps = true;
+
+var prim_call_with_input_file = function (args, k) {
+	if (!NODE_FS) throw 'call-with-input-file: file ports require Node.js';
+	var port = make_string_input_port(NODE_FS.readFileSync(String(args[0]), 'utf8'));
+	var proc = args[1];
+	return s_apply(proc, [port], function (result) {
+		port.closed = true;
+		return bounce(function () { return k(result); });
+	});
+};
+prim_call_with_input_file.cps = true;
+
+var prim_call_with_output_file = function (args, k) {
+	if (!NODE_FS) throw 'call-with-output-file: file ports require Node.js';
+	var port = new Port({ isOutput: true, kind: 'file', fileName: String(args[0]) });
+	var proc = args[1];
+	return s_apply(proc, [port], function (result) {
+		flush_port(port); port.closed = true;
+		return bounce(function () { return k(result); });
+	});
+};
+prim_call_with_output_file.cps = true;
+
+var prim_with_output_to_file = function (args, k) {
+	if (!NODE_FS) throw 'with-output-to-file: file ports require Node.js';
+	var port = new Port({ isOutput: true, kind: 'file', fileName: String(args[0]) });
+	var thunk = args[1];
+	var saved = current_output_port_obj;
+	current_output_port_obj = port;
+	return s_apply(thunk, [], function (result) {
+		current_output_port_obj = saved;
+		flush_port(port); port.closed = true;
+		return bounce(function () { return k(result); });
+	});
+};
+prim_with_output_to_file.cps = true;
+
+var prim_with_input_from_file = function (args, k) {
+	if (!NODE_FS) throw 'with-input-from-file: file ports require Node.js';
+	var port = make_string_input_port(NODE_FS.readFileSync(String(args[0]), 'utf8'));
+	var thunk = args[1];
+	var saved = current_input_port_obj;
+	current_input_port_obj = port;
+	return s_apply(thunk, [], function (result) {
+		current_input_port_obj = saved;
+		return bounce(function () { return k(result); });
+	});
+};
+prim_with_input_from_file.cps = true;
+
+primitive_procedures['call-with-output-string'] = prim_call_with_output_string;
+primitive_procedures['with-output-to-string'] = prim_with_output_to_string;
+primitive_procedures['with-input-from-string'] = prim_with_input_from_string;
+primitive_procedures['call-with-input-file'] = prim_call_with_input_file;
+primitive_procedures['call-with-output-file'] = prim_call_with_output_file;
+primitive_procedures['with-output-to-file'] = prim_with_output_to_file;
+primitive_procedures['with-input-from-file'] = prim_with_input_from_file;
 
 // ------------------------------------------------------------------
 // 式の各種アクセサ
@@ -866,6 +1715,18 @@ isquasiquote = function (exp) {
 };
 isdelay = function (exp) {
 	return istagged_list(exp, "delay");
+};
+isdefine_syntax = function (exp) {
+	return istagged_list(exp, "define-syntax");
+};
+islet_syntax = function (exp) {
+	return istagged_list(exp, "let-syntax");
+};
+isletrec_syntax = function (exp) {
+	return istagged_list(exp, "letrec-syntax");
+};
+issyntax_rules = function (p) {
+	return istagged_list(p, "syntax-rules");
 };
 // タグが文字列でも Symbol でも一致判定する
 tag_equals = function (x, name) {
@@ -968,8 +1829,8 @@ function seval(exp, env, k) {
 	if (typeof exp === 'boolean' || exp == null) {
 		return bounce(function () { return k(exp); });
 	}
-	// 文字 / ベクタ / 多値 / プロミス はそのまま自己評価
-	if (exp instanceof Char || exp instanceof SVector || exp instanceof Values || exp instanceof Promise) {
+	// 文字 / ベクタ / 多値 / プロミス / 有理数 / 複素数 はそのまま自己評価
+	if (exp instanceof Char || exp instanceof SVector || exp instanceof Values || exp instanceof Promise || exp instanceof Rational || exp instanceof Complex) {
 		return bounce(function () { return k(exp); });
 	}
 	// 自己評価式 (数値・文字列リテラル)
@@ -995,6 +1856,17 @@ function seval(exp, env, k) {
 	// define-macro
 	if (isdefine_macro(exp)) {
 		return eval_define_macro(exp, env, k);
+	}
+	// define-syntax
+	if (isdefine_syntax(exp)) {
+		var sName = car(cdr(exp)).name;
+		var sSpec = car(cdr(cdr(exp)));
+		env.add(sName, make_syntax_rules(sSpec, env));
+		return bounce(function () { return k(sName); });
+	}
+	// let-syntax / letrec-syntax
+	if (islet_syntax(exp) || isletrec_syntax(exp)) {
+		return eval_let_syntax(exp, env, k);
 	}
 	// let
 	if (islet(exp)) {
@@ -1076,6 +1948,14 @@ eval_definition = function (exp, env, k) {
 		env.add(name, make_procedure(params, body, env));
 		return bounce(function () { return k(name); });
 	}
+	if (target instanceof Pair) {
+		// 可変長 define: (define (name . args) body) / (define (name a . rest) body)
+		var pname = (target.car instanceof Symbol) ? target.car.name : target.car;
+		var pparams = target.cdr; // Symbol(可変長) または不完全 Pair
+		var pbody = cdr(cdr(exp));
+		env.add(pname, make_procedure(pparams, pbody, env));
+		return bounce(function () { return k(pname); });
+	}
 	// (define name value)
 	var sym = target.name;
 	return seval(car(cdr(cdr(exp))), env, function (value) {
@@ -1093,6 +1973,22 @@ eval_define_macro = function (exp, env, k) {
 	return bounce(function () { return k(name); });
 };
 
+// (let-syntax ((name (syntax-rules ...)) ...) body ...)
+// (letrec-syntax ...) も同様に扱う(本実装では両者を同一視)
+eval_let_syntax = function (exp, env, k) {
+	var bindings = car(cdr(exp));
+	var body = cdr(cdr(exp));
+	var newEnv = new Env(env);
+	if (bindings != null) {
+		for (var i = 0; i < bindings.length; i++) {
+			var nm = car(bindings[i]).name;
+			var spec = car(cdr(bindings[i]));
+			newEnv.add(nm, make_syntax_rules(spec, newEnv));
+		}
+	}
+	return eval_sequence(body, newEnv, k);
+};
+
 eval_if = function (exp, env, k) {
 	return seval(car(cdr(exp)), env, function (test) {
 		if (isTruthy(test)) {
@@ -1103,17 +1999,24 @@ eval_if = function (exp, env, k) {
 };
 
 // let は lambda 適用へ脱糖。第2要素がシンボルなら「名前付き let」。
+// 本体は複数式を許す。
 eval_let = function (exp, env, k) {
 	if (car(cdr(exp)) instanceof Symbol) {
 		return eval_named_let(exp, env, k);
 	}
-	var param_list = let_to_parameters_args_body(exp);
-	var arg = param_list[1];
-	var new_exp = [['lambda', param_list[0], param_list[2]]];
-	for (var i = 0; i < arg.length; i++) {
-		new_exp.push(car(arg[i]));
+	var bindings = car(cdr(exp));
+	var body = cdr(cdr(exp));
+	var params = [];
+	var argExprs = [];
+	if (bindings != null) {
+		for (var i = 0; i < bindings.length; i++) {
+			params.push(car(bindings[i]));
+			argExprs.push(car(cdr(bindings[i])));
+		}
 	}
-	return seval(new_exp, env, k);
+	var lambda = ['lambda', params].concat(body);
+	var app = [lambda].concat(argExprs);
+	return seval(app, env, k);
 };
 
 // 名前付き let: (let name ((v init) ...) body ...)
@@ -1218,11 +2121,14 @@ eval_do = function (exp, env, k) {
 
 // quasiquote: テンプレートを評価し、unquote(,) は評価結果に、
 // unquote-splicing(,@) はリストを展開して埋め込む。ネスト(depth)も扱う。
+// quasiquote の結果は「本物の Pair リスト」を生成する。
+function quasi_atom(tmpl) {
+	if (typeof tmpl === 'string') return tmpl.replace(/\"/g, ''); // 文字列リテラルの引用符除去
+	return tmpl;                                                  // Symbol / 数値 / 文字 等はそのまま
+}
 eval_quasi = function (tmpl, depth, env, k) {
 	if (!(tmpl instanceof Array)) {
-		// アトム: シンボルは名前文字列に(quote と同様)、それ以外はそのまま
-		var v = (tmpl instanceof Symbol) ? tmpl.name : tmpl;
-		return bounce(function () { return k(v); });
+		return bounce(function () { return k(quasi_atom(tmpl)); });
 	}
 	// (unquote x)
 	if (tmpl.length > 0 && tag_equals(tmpl[0], 'unquote')) {
@@ -1230,13 +2136,13 @@ eval_quasi = function (tmpl, depth, env, k) {
 			return seval(tmpl[1], env, k);
 		}
 		return eval_quasi(tmpl[1], depth - 1, env, function (inner) {
-			return bounce(function () { return k(['unquote', inner]); });
+			return bounce(function () { return k(new Pair(new Symbol('unquote'), new Pair(inner, null))); });
 		});
 	}
 	// (quasiquote x) ネスト
 	if (tmpl.length > 0 && tag_equals(tmpl[0], 'quasiquote')) {
 		return eval_quasi(tmpl[1], depth + 1, env, function (inner) {
-			return bounce(function () { return k(['quasiquote', inner]); });
+			return bounce(function () { return k(new Pair(new Symbol('quasiquote'), new Pair(inner, null))); });
 		});
 	}
 	// 一般のリスト: 各要素を処理。depth===1 の unquote-splicing は展開する。
@@ -1245,20 +2151,19 @@ eval_quasi = function (tmpl, depth, env, k) {
 
 quasi_list = function (items, i, depth, env, k) {
 	if (i >= items.length) {
-		return bounce(function () { return k([]); });
+		return bounce(function () { return k(null); });
 	}
 	var e = items[i];
 	if (e instanceof Array && e.length > 0 && tag_equals(e[0], 'unquote-splicing') && depth === 1) {
 		return seval(e[1], env, function (spliced) {
 			return quasi_list(items, i + 1, depth, env, function (rest) {
-				var arr = (spliced == null) ? [] : (Array.isArray(spliced) ? spliced : [spliced]);
-				return bounce(function () { return k(arr.concat(rest)); });
+				return bounce(function () { return k(append_pair(spliced, rest)); });
 			});
 		});
 	}
 	return eval_quasi(e, depth, env, function (head) {
 		return quasi_list(items, i + 1, depth, env, function (rest) {
-			return bounce(function () { return k([head].concat(rest)); });
+			return bounce(function () { return k(new Pair(head, rest)); });
 		});
 	});
 };
@@ -1338,7 +2243,11 @@ eval_case = function (exp, env, k) {
 			var datums = head;
 			if (datums != null) {
 				for (var i = 0; i < datums.length; i++) {
-					if (normalize_datum(datums[i]) == nkey) {
+					var d = datums[i];
+					var matched = is_scheme_number(key)
+						? (is_scheme_number(d) && num_eq(d, key))
+						: (normalize_datum(d) == nkey);
+					if (matched) {
 						return eval_sequence(cdr(clause), env, k);
 					}
 				}
@@ -1380,15 +2289,202 @@ expand_macro = function (macro, argExprs, k) {
 	return eval_sequence(macro[2], macroEnv, k);
 };
 
+// ==================================================================
+// syntax-rules (パターンマッチに基づくマクロ)
+//   ["syntax-rules", literalNames(配列), rules(配列), defEnv]
+//   各 rule は [pattern, template]。
+//   パターン変数・リテラル・... (エリプシス)・_ (ワイルドカード) に対応。
+//   ※ 完全な健全性(hygiene)は簡易対応。テンプレート導入の束縛変数は
+//      gensym で改名し、最も典型的な変数捕捉を回避する。
+// ==================================================================
+
+// エリプシスでマッチした列を区別するためのラッパ
+function EllipsisMatch(items) { this.items = items; }
+
+var ELLIPSIS = '...';
+var WILDCARD = '_';
+
+// 識別子の名前を取り出す(Symbol でも文字列でも)。識別子でなければ null。
+function id_name(x) {
+	if (x instanceof Symbol) return x.name;
+	if (typeof x === 'string') return x;
+	return null;
+}
+function is_ellipsis(x) { return id_name(x) === ELLIPSIS; }
+
+// 変換器を生成: (syntax-rules (lit ...) (pat tmpl) ...)
+make_syntax_rules = function (spec, env) {
+	var litList = car(cdr(spec));
+	var literals = [];
+	if (litList != null) {
+		for (var i = 0; i < litList.length; i++) {
+			literals.push(id_name(litList[i]));
+		}
+	}
+	var rules = cdr(cdr(spec));
+	return ["syntax-rules", literals, rules, env];
+};
+
+// パターン変数を収集(リテラル/.../ _ を除く識別子)
+function collect_pattern_vars(pat, literals, acc) {
+	if (pat instanceof Array) {
+		for (var i = 0; i < pat.length; i++) collect_pattern_vars(pat[i], literals, acc);
+		return acc;
+	}
+	var nm = id_name(pat);
+	if (nm === null) return acc;
+	if (nm === ELLIPSIS || nm === WILDCARD) return acc;
+	if (literals.indexOf(nm) >= 0) return acc;
+	acc[nm] = true;
+	return acc;
+}
+
+// マッチ: 成功で bindings(オブジェクト)に追記して true、失敗で false。
+function sr_match(pat, form, literals, bindings) {
+	var nm = id_name(pat);
+	// 識別子パターン
+	if (nm !== null && !(pat instanceof Array)) {
+		if (nm === WILDCARD) return true;
+		if (literals.indexOf(nm) >= 0) {
+			// リテラル: 同名の識別子にのみマッチ
+			return id_name(form) === nm;
+		}
+		// パターン変数
+		bindings[nm] = form;
+		return true;
+	}
+	// リストパターン
+	if (pat instanceof Array) {
+		if (!(form instanceof Array) && form != null) return false;
+		var inp = (form == null) ? [] : form;
+		return sr_match_list(pat, inp, literals, bindings);
+	}
+	// リテラルデータ(数値など)
+	return sequal(pat, form);
+}
+
+function sr_match_list(pat, inp, literals, bindings) {
+	for (var i = 0; i < pat.length; i++) {
+		// 次が ... ならエリプシス
+		if (i + 1 < pat.length && is_ellipsis(pat[i + 1])) {
+			var sub = pat[i];
+			var fixedAfter = pat.length - (i + 2);
+			var available = inp.length - i - fixedAfter;
+			if (available < 0) return false;
+			// エリプシスにマッチする部分列を収集
+			var subVars = collect_pattern_vars(sub, literals, {});
+			var collected = {};
+			for (var v in subVars) collected[v] = [];
+			for (var j = 0; j < available; j++) {
+				var sb = {};
+				if (!sr_match(sub, inp[i + j], literals, sb)) return false;
+				for (var v2 in subVars) collected[v2].push(sb[v2]);
+			}
+			for (var v3 in subVars) bindings[v3] = new EllipsisMatch(collected[v3]);
+			// エリプシス後の固定パターンをマッチ
+			var rest = inp.slice(i + available);
+			var restPat = pat.slice(i + 2);
+			return sr_match_list(restPat, rest, literals, bindings);
+		}
+		if (i >= inp.length) return false;
+		if (!sr_match(pat[i], inp[i], literals, bindings)) return false;
+	}
+	return inp.length === pat.length;
+}
+
+// テンプレート中で使われているエリプシス変数名を集める
+function ellipsis_vars_in(tmpl, bindings, acc) {
+	if (tmpl instanceof Array) {
+		for (var i = 0; i < tmpl.length; i++) ellipsis_vars_in(tmpl[i], bindings, acc);
+		return acc;
+	}
+	var nm = id_name(tmpl);
+	if (nm !== null && bindings[nm] instanceof EllipsisMatch) acc[nm] = true;
+	return acc;
+}
+
+// テンプレート展開
+function sr_expand(tmpl, bindings, rename) {
+	// 識別子
+	var nm = id_name(tmpl);
+	if (nm !== null && !(tmpl instanceof Array)) {
+		if (Object.prototype.hasOwnProperty.call(bindings, nm)) {
+			var val = bindings[nm];
+			if (val instanceof EllipsisMatch) {
+				// 単独使用は不正だが、念のため最初の要素を返す
+				return val.items.length ? val.items[0] : null;
+			}
+			return val;
+		}
+		// テンプレート導入の識別子: 改名対象なら置換(簡易 hygiene)
+		if (rename && Object.prototype.hasOwnProperty.call(rename, nm)) {
+			return new Symbol(rename[nm]);
+		}
+		return tmpl;
+	}
+	if (tmpl instanceof Array) {
+		var out = [];
+		for (var i = 0; i < tmpl.length; i++) {
+			if (i + 1 < tmpl.length && is_ellipsis(tmpl[i + 1])) {
+				var sub = tmpl[i];
+				var evars = ellipsis_vars_in(sub, bindings, {});
+				var names = Object.keys(evars);
+				var n = 0;
+				if (names.length > 0) {
+					n = bindings[names[0]].items.length;
+				}
+				for (var j = 0; j < n; j++) {
+					var sb = {};
+					for (var key in bindings) sb[key] = bindings[key];
+					for (var t = 0; t < names.length; t++) {
+						sb[names[t]] = bindings[names[t]].items[j];
+					}
+					out.push(sr_expand(sub, sb, rename));
+				}
+				i++; // ... をスキップ
+			} else {
+				out.push(sr_expand(tmpl[i], bindings, rename));
+			}
+		}
+		return out;
+	}
+	return tmpl;
+}
+
+var sr_gensym_counter = 0;
+
+// syntax-rules マクロを展開する。form は呼び出し全体 (keyword arg ...)。
+expand_syntax_rules = function (transformer, form) {
+	var literals = transformer[1];
+	var rules = transformer[2];
+	for (var r = 0; r < rules.length; r++) {
+		var pattern = car(rules[r]);
+		var template = car(cdr(rules[r]));
+		var bindings = {};
+		// パターンの先頭(マクロキーワード)は無視し、残りをマッチ
+		var patRest = (pattern instanceof Array) ? pattern.slice(1) : [];
+		var formRest = (form instanceof Array) ? form.slice(1) : [];
+		if (sr_match_list(patRest, formRest, literals, bindings)) {
+			return sr_expand(template, bindings, null);
+		}
+	}
+	throw ('no matching syntax-rules clause for ' + scheme_repr(form, true));
+};
+
 eval_application = function (exp, env, k) {
 	var op = operator(exp);
-	// マクロ呼び出しか? (演算子がシンボル/シンボル名文字列の場合)
+	// マクロ / syntax-rules 呼び出しか? (演算子が識別子の場合)
 	if (op instanceof Symbol || typeof op === 'string') {
-		var maybeMacro = env.tryFind(op);
-		if (maybeMacro && ismacro(maybeMacro)) {
-			return expand_macro(maybeMacro, operands(exp), function (expanded) {
-				return seval(expanded, env, k);
+		var bound = env.tryFind(op);
+		if (bound && ismacro(bound)) {
+			return expand_macro(bound, operands(exp), function (expanded) {
+				// マクロ本体が list/cons/quasiquote で構築したコードは Pair なので AST へ変換
+				return seval(to_ast(expanded), env, k);
 			});
+		}
+		if (bound && issyntax_rules(bound)) {
+			var expanded2 = expand_syntax_rules(bound, exp);
+			return seval(expanded2, env, k);
 		}
 	}
 	// 演算子を評価
@@ -1487,14 +2583,30 @@ Tokenizer.prototype.value = function () {
 Tokenizer.prototype.next = function () {
 	var inQuote = false;
 	var token = "";
-	while (this.code.charAt(this.point) in { "\n": 0, " ": 0 }) {
-		this.point++;
+	// 先頭の空白と ; 行コメント(行末まで)を読み飛ばす
+	while (this.point < this.code.length) {
+		var wc = this.code.charAt(this.point);
+		if (wc === ' ' || wc === '\n' || wc === '\t' || wc === '\r') {
+			this.point++;
+			continue;
+		}
+		if (wc === ';') {
+			while (this.point < this.code.length && this.code.charAt(this.point) !== '\n') this.point++;
+			continue;
+		}
+		break;
 	}
+	// read 用: このトークンの開始位置(空白/コメント除去後)を記録
+	this.tokenStart = this.point;
 	loop:
 	for (var i = this.point; i < this.code.length; i++) {
 		var c = this.code.charAt(i);
 
 		switch (c) {
+			case ";":
+				// 文字列外の ; は行コメント開始。現在のトークンで区切る。
+				if (inQuote) { token += c; break; }
+				break loop;
 			case "\"":
 				inQuote = !inQuote;
 				token += c;
@@ -1503,16 +2615,16 @@ Tokenizer.prototype.next = function () {
 			case ")":
 			case "'":
 			case "`":
-				if (token.length > 0)
-					break loop;
-				i++;
+				// 文字列内なら通常の文字として扱う(括弧やクォートを含む文字列を壊さない)
 				if (inQuote) {
 					token += c;
 					break;
-				} else {
-					token = c;
-					break loop;
 				}
+				if (token.length > 0)
+					break loop;
+				i++;
+				token = c;
+				break loop;
 			case ",":
 				// 文字列内ならただの文字
 				if (inQuote) {
@@ -1553,10 +2665,12 @@ Tokenizer.prototype.next = function () {
 		return this.current = char_from_token(token);
 	}
 
-	//symbolのチェック
-	if (is_Number(token)) {
-		this.current = Number(token);
+	// 数値(整数・有理数・小数・基数/正確さ接頭辞)
+	var parsedNum = parse_number(token);
+	if (parsedNum !== null) {
+		return this.current = parsedNum;
 	}
+	//symbolのチェック
 	if (is_Symbol(token)) {
 		return this.current = new Symbol(token);
 
@@ -1579,9 +2693,15 @@ char_from_token = function (token) {
 	}
 	return new Char(name.charAt(0));
 };
+// シンボルはインターン(名前ごとに一意のインスタンス)する。
+// これにより (eq? 'a 'a) や memq/assq がシンボルでも正しく動作する。
+var SYMBOL_TABLE = {};
 function Symbol(str) {
+	var existing = SYMBOL_TABLE[str];
+	if (existing) return existing;
 	this.tag = TAG_SYMBOL;
 	this.name = str;
+	SYMBOL_TABLE[str] = this;
 }
 is_Number = function (token) {
 	if (token === "") return false;
@@ -1612,6 +2732,10 @@ atom = {
 	"'": true,
 	"define": true,
 	"define-macro": true,
+	"define-syntax": true,
+	"syntax-rules": true,
+	"let-syntax": true,
+	"letrec-syntax": true,
 	"set!": true,
 	"lambda": true,
 	"begin": true,
@@ -1632,6 +2756,11 @@ atom = {
 	",@": true
 };
 
+// ドット対の区切り '.' か?(単独のドットのみ。1.5 等の数値は parse_number 済み)
+function is_dot_token(v) {
+	return v === '.' || (v instanceof Symbol && v.name === '.');
+}
+
 parse = function (tokenizer) {
 
 	var ret;
@@ -1640,13 +2769,30 @@ parse = function (tokenizer) {
 			tokenizer.next();
 			ret = null;
 		} else {
-			ret = new Array();
+			var elems = [];
+			var dottedTail = null;
+			var dotted = false;
 			// 厳密比較を使う: 数値 0 は loose比較だと 0 == "" が真になり要素が脱落する
 			while (tokenizer.value() !== "" && tokenizer.value() !== ")") {
-				ret[ret.length] = parse(tokenizer);
+				// ドット対 (a b . c): '.' の後ろの 1 要素が cdr(末尾)になる
+				if (is_dot_token(tokenizer.value())) {
+					tokenizer.next();
+					dottedTail = parse(tokenizer);
+					dotted = true;
+					break;
+				}
+				elems[elems.length] = parse(tokenizer);
 			}
 			if (tokenizer.value() == ")")
 				tokenizer.next();
+			if (dotted) {
+				// 不完全リストを本物の Pair で構築して返す(引用データ用)
+				var lst = dottedTail;
+				for (var di = elems.length - 1; di >= 0; di--) lst = new Pair(elems[di], lst);
+				ret = lst;
+			} else {
+				ret = elems;
+			}
 		}
 	} else if (tokenizer.value() == "\'") {
 		tokenizer.next();
@@ -1732,7 +2878,42 @@ if (typeof document !== 'undefined' && typeof window !== 'undefined') {
 	}
 }
 
+// ------------------------------------------------------------------
+// 対話 REPL(Node.js の stdin から read して評価)
+//   scheme_repl() または node schemInp.js で起動。
+// ------------------------------------------------------------------
+scheme_repl = function (prompt) {
+	if (!HAS_STDIN) throw 'scheme_repl: interactive stdin requires Node.js';
+	prompt = (prompt === undefined) ? '> ' : prompt;
+	scheme_output('scheme.js REPL (Ctrl-D で終了)\n');
+	while (true) {
+		scheme_output(prompt);
+		var datum;
+		try {
+			datum = port_read(STDIN_PORT);
+		} catch (e) {
+			scheme_output('read error: ' + e + '\n');
+			continue;
+		}
+		if (datum === EOF_OBJECT) {
+			scheme_output('\n');
+			break;
+		}
+		try {
+			var result = trampoline(seval(to_ast(datum), theGlobalEnv, function (v) { return v; }));
+			scheme_output(scheme_repr(result, true) + '\n');
+		} catch (e) {
+			scheme_output('error: ' + e + '\n');
+		}
+	}
+};
+
+// 直接実行時は REPL を起動: node schemInp.js
+if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
+	scheme_repl();
+}
+
 // Node.js から利用できるようにエクスポート (ブラウザ環境では無視される)
 if (typeof module !== 'undefined' && module.exports) {
-	module.exports = { scheme: scheme, scheme_eval: scheme_eval };
+	module.exports = { scheme: scheme, scheme_eval: scheme_eval, repr: scheme_repr, scheme_repl: scheme_repl };
 }

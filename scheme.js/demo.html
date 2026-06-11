@@ -40,6 +40,55 @@
 		(display (apply + (list 1 2 3 4 5)))
 		(newline)
 		(write (string-append "char=" (number->string (char->integer #\A))))
+		(newline)
+
+		;; --- syntax-rules (パターンマッチに基づくマクロ) ---
+		(define-syntax my-and
+		  (syntax-rules ()
+		    ((_) #t)
+		    ((_ e) e)
+		    ((_ e1 e2 ...) (if e1 (my-and e2 ...) #f))))
+		(display (my-and 1 2 3))
+		(newline)
+
+		;; --- 数値タワー (多倍長整数 / 有理数 / exact-inexact) ---
+		(write (* 1000000000000 1000000000000))
+		(newline)
+		(write (+ 1/3 1/6))
+		(newline)
+		(write (list (exact? 3) (inexact? 3.0) (expt 2 -2)))
+		(newline)
+
+		;; --- 本物のペア (cons セル / ドット対) ---
+		(write (cons 1 2))
+		(newline)
+		(write '(1 2 . 3))
+		(newline)
+		(define p (cons 'x 'y))
+		(set-cdr! p 'z)
+		(write p)
+		(newline)
+		(define (sum . xs) (apply + xs))
+		(display (sum 1 2 3 4 5))
+		(newline)
+
+		;; --- 複素数 ---
+		(write (* 3+4i 1+2i))
+		(newline)
+		(write (list (magnitude 3+4i) (real-part 3+4i) (sqrt -1)))
+		(newline)
+		(write (sin (make-rectangular 1 2)))
+		(newline)
+		(write (exp +i))
+		(newline)
+
+		;; --- I/O ポート(文字列ポート) ---
+		(display (call-with-output-string
+		           (lambda (p) (display "x=" p) (write (+ 20 22) p))))
+		(newline)
+		(define ip (open-input-string "(+ 1 2 3) hello"))
+		(write (eval (read ip)))
+		(write (read ip))
 	</script>
 </body>
 
