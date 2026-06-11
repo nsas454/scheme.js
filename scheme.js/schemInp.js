@@ -356,6 +356,37 @@ procedure_environment = function (p) {
 //   後から何度でも呼び出せる(再入可能・再利用可能)。
 //   継続を呼ぶと、その時点の継続を破棄して捕捉済みの k へジャンプする。
 // ------------------------------------------------------------------
+// dynamic-wind スタック(継続の脱出/再入時に before/after を実行)
+var windStack = [];
+
+function wind_stack_copy() { return windStack.slice(); }
+
+function wind_transfer(targetStack, k) {
+	var current = windStack;
+	var common = 0;
+	while (common < current.length && common < targetStack.length && current[common] === targetStack[common]) {
+		common++;
+	}
+	var runAfters = function (idx) {
+		if (idx <= common) {
+			return wind_push_befores(targetStack, common, k);
+		}
+		var frame = windStack.pop();
+		return s_apply(frame.after, [], function () { return runAfters(idx - 1); });
+	};
+	return runAfters(current.length);
+}
+
+function wind_push_befores(targetStack, start, k) {
+	if (start >= targetStack.length) {
+		return bounce(function () { return k(); });
+	}
+	return s_apply(targetStack[start].before, [], function () {
+		windStack.push(targetStack[start]);
+		return wind_push_befores(targetStack, start + 1, k);
+	});
+}
+
 iscontinuation = function (p) {
 	return istagged_list(p, 'continuation');
 };
@@ -382,7 +413,7 @@ apply_primitive_procedure = function (proc, args, k) {
 // s_apply 側で捕捉済みの k へジャンプする。
 var callcc = function (args, k) {
 	var proc = args[0];
-	var continuation = ["continuation", k];
+	var continuation = ["continuation", k, wind_stack_copy()];
 	return s_apply(proc, [continuation], k);
 };
 callcc.cps = true;
@@ -886,15 +917,20 @@ var prim_cwv = function (args, k) {
 };
 prim_cwv.cps = true;
 
-// (dynamic-wind before thunk after)
-// 注: 通常完了時に after を実行する。継続による脱出/再入には未対応(簡易版)。
+// (dynamic-wind before thunk after) — 継続による脱出/再入でも before/after を実行
 var prim_dynamic_wind = function (args, k) {
 	var before = args[0], thunk = args[1], after = args[2];
+	var frame = { before: before, after: after };
 	return s_apply(before, [], function (ignored) {
+		windStack.push(frame);
 		return s_apply(thunk, [], function (result) {
-			return s_apply(after, [], function (ignored2) {
-				return bounce(function () { return k(result); });
-			});
+			if (windStack.length > 0 && windStack[windStack.length - 1] === frame) {
+				windStack.pop();
+				return s_apply(after, [], function (ignored2) {
+					return bounce(function () { return k(result); });
+				});
+			}
+			return bounce(function () { return k(result); });
 		});
 	});
 };
@@ -1682,6 +1718,40 @@ primitive_procedures['call-with-output-file'] = prim_call_with_output_file;
 primitive_procedures['with-output-to-file'] = prim_with_output_to_file;
 primitive_procedures['with-input-from-file'] = prim_with_input_from_file;
 
+// --- 追加 R5RS 手続き --------------------------------------------
+var EXTRA_R5RS = {
+	'load': function (args) {
+		var path = String(args[0]);
+		if (!NODE_FS) throw 'load: requires Node.js';
+		scheme(NODE_FS.readFileSync(path, 'utf8'));
+		return undefined;
+	},
+	'set-current-input-port!': function (args) { current_input_port_obj = args[0]; return undefined; },
+	'set-current-output-port!': function (args) { current_output_port_obj = args[0]; return undefined; },
+	'string-ci=?': function (args) { return String(args[0]).toLowerCase() === String(args[1]).toLowerCase(); },
+	'string-ci<?': function (args) { return String(args[0]).toLowerCase() < String(args[1]).toLowerCase(); },
+	'string-ci>?': function (args) { return String(args[0]).toLowerCase() > String(args[1]).toLowerCase(); },
+	'string-ci<=?': function (args) { return String(args[0]).toLowerCase() <= String(args[1]).toLowerCase(); },
+	'string-ci>=?': function (args) { return String(args[0]).toLowerCase() >= String(args[1]).toLowerCase(); },
+	'char-ci=?': function (args) { return args[0].ch.toLowerCase() === args[1].ch.toLowerCase(); },
+	'char-ci<?': function (args) { return args[0].ch.toLowerCase() < args[1].ch.toLowerCase(); },
+	'char-ci>?': function (args) { return args[0].ch.toLowerCase() > args[1].ch.toLowerCase(); },
+	'char-ci<=?': function (args) { return args[0].ch.toLowerCase() <= args[1].ch.toLowerCase(); },
+	'char-ci>=?': function (args) { return args[0].ch.toLowerCase() >= args[1].ch.toLowerCase(); },
+	'vector-copy': function (args) { return new SVector(args[0].items.slice()); },
+	'vector-copy!': function (args) {
+		var dest = args[0].items, src = args[1].items;
+		var dstart = args.length > 2 ? to_jsint(args[2]) : 0;
+		var sstart = args.length > 3 ? to_jsint(args[3]) : 0;
+		var send = args.length > 4 ? to_jsint(args[4]) : src.length;
+		for (var i = sstart, j = dstart; i < send; i++, j++) dest[j] = src[i];
+		return undefined;
+	}
+};
+(function () {
+	for (var name in EXTRA_R5RS) primitive_procedures[name] = EXTRA_R5RS[name];
+})();
+
 // ------------------------------------------------------------------
 // 式の各種アクセサ
 // ------------------------------------------------------------------
@@ -1924,7 +1994,10 @@ function seval(exp, env, k) {
 	}
 	// begin
 	if (isbegin(exp)) {
-		return eval_sequence(begin_actions(exp), env, k);
+		return eval_body(begin_actions(exp), env, k);
+	}
+	if (istagged_list(exp, 'macro-capture')) {
+		return bounce(function () { return k(exp[1]); });
 	}
 	// cond
 	if (iscond(exp)) {
@@ -1994,7 +2067,7 @@ eval_let_syntax = function (exp, env, k) {
 			newEnv.add(nm, make_syntax_rules(spec, newEnv));
 		}
 	}
-	return eval_sequence(body, newEnv, k);
+	return eval_body(body, newEnv, k);
 };
 
 eval_if = function (exp, env, k) {
@@ -2066,7 +2139,7 @@ eval_letrec = function (exp, env, k) {
 	}
 	var bind = function (j) {
 		if (bindings == null || j >= bindings.length) {
-			return eval_sequence(body, newEnv, k);
+			return eval_body(body, newEnv, k);
 		}
 		return seval(car(cdr(bindings[j])), newEnv, function (value) {
 			newEnv.add(names[j], value);
@@ -2266,6 +2339,35 @@ eval_case = function (exp, env, k) {
 	});
 };
 
+// 内部 define を letrec へ変換 (R5RS 準拠)
+define_to_letrec_binding = function (def) {
+	var target = car(cdr(def));
+	if (target instanceof Array) {
+		return [car(target), ['lambda', cdr(target)].concat(cdr(cdr(def)))];
+	}
+	if (target instanceof Pair) {
+		return [target.car, ['lambda', target.cdr].concat(cdr(cdr(def)))];
+	}
+	return [target, car(cdr(cdr(def)))];
+};
+
+transform_internal_defines = function (exps) {
+	if (exps == null || exps.length === 0) return exps;
+	var defs = [];
+	var i = 0;
+	while (i < exps.length && isdefine(exps[i])) {
+		defs.push(define_to_letrec_binding(exps[i]));
+		i++;
+	}
+	if (defs.length === 0) return exps;
+	return [['letrec', defs].concat(exps.slice(i))];
+};
+
+// 本体評価: 先頭の内部 define を letrec へ脱糖してから評価
+eval_body = function (exps, env, k) {
+	return eval_sequence(transform_internal_defines(exps), env, k);
+};
+
 // 式の配列を順に評価し、最後の値を継続へ渡す
 eval_sequence = function (exps, env, k) {
 	if (exps == null || exps.length === 0) {
@@ -2298,12 +2400,8 @@ expand_macro = function (macro, argExprs, k) {
 };
 
 // ==================================================================
-// syntax-rules (パターンマッチに基づくマクロ)
-//   ["syntax-rules", literalNames(配列), rules(配列), defEnv]
-//   各 rule は [pattern, template]。
-//   パターン変数・リテラル・... (エリプシス)・_ (ワイルドカード) に対応。
-//   ※ 完全な健全性(hygiene)は簡易対応。テンプレート導入の束縛変数は
-//      gensym で改名し、最も典型的な変数捕捉を回避する。
+// syntax-rules (パターンマッチ + 衛生的マクロ展開)
+//   テンプレート導入の束縛は gensym、マクロ定義環境の自由変数は macro-capture で保持。
 // ==================================================================
 
 // エリプシスでマッチした列を区別するためのラッパ
@@ -2411,47 +2509,117 @@ function ellipsis_vars_in(tmpl, bindings, acc) {
 	return acc;
 }
 
-// テンプレート展開
-function sr_expand(tmpl, bindings, rename) {
-	// 識別子
+var sr_gensym_counter = 0;
+
+function sr_fresh_name(base) {
+	sr_gensym_counter++;
+	return '%syn' + sr_gensym_counter + '%' + base;
+}
+
+function sr_pvar_set(bindings) {
+	var m = {};
+	for (var k in bindings) {
+		if (!(bindings[k] instanceof EllipsisMatch)) m[k] = true;
+	}
+	return m;
+}
+
+function sr_bind_id(name, pvars, literals, scope) {
+	if (!name || pvars[name] || literals.indexOf(name) >= 0) return;
+	scope[name] = sr_fresh_name(name);
+}
+
+function sr_bind_params(params, pvars, literals, scope) {
+	if (params instanceof Symbol) {
+		sr_bind_id(params.name, pvars, literals, scope);
+		return;
+	}
+	if (params instanceof Array) {
+		for (var i = 0; i < params.length; i++) {
+			var n = id_name(params[i]);
+			if (n) sr_bind_id(n, pvars, literals, scope);
+		}
+		return;
+	}
+	if (params instanceof Pair) {
+		var p = params;
+		while (p instanceof Pair) {
+			sr_bind_id(id_name(p.car), pvars, literals, scope);
+			p = p.cdr;
+		}
+		if (p instanceof Symbol) sr_bind_id(p.name, pvars, literals, scope);
+	}
+}
+
+function sr_bind_let_bindings(binds, pvars, literals, scope) {
+	if (binds == null) return;
+	for (var i = 0; i < binds.length; i++) {
+		var nm = id_name(car(binds[i]));
+		if (nm) sr_bind_id(nm, pvars, literals, scope);
+	}
+}
+
+function sr_bind_define_target(target, pvars, literals, scope) {
+	if (target instanceof Array) {
+		sr_bind_id(id_name(car(target)), pvars, literals, scope);
+	} else if (target instanceof Pair) {
+		sr_bind_id(id_name(target.car), pvars, literals, scope);
+	} else {
+		sr_bind_id(id_name(target), pvars, literals, scope);
+	}
+}
+
+// 衛生的テンプレート展開(scope: 導入束縛の改名, exports: defEnv 由来の捕捉)
+function sr_expand_scoped(tmpl, bindings, literals, defEnv, scope, exports, pvars) {
+	scope = scope || {};
+	exports = exports || {};
+	pvars = pvars || sr_pvar_set(bindings);
+
 	var nm = id_name(tmpl);
 	if (nm !== null && !(tmpl instanceof Array)) {
-		if (Object.prototype.hasOwnProperty.call(bindings, nm)) {
+		if (pvars[nm]) {
 			var val = bindings[nm];
-			if (val instanceof EllipsisMatch) {
-				// 単独使用は不正だが、念のため最初の要素を返す
-				return val.items.length ? val.items[0] : null;
-			}
+			if (val instanceof EllipsisMatch) return val.items.length ? val.items[0] : null;
 			return val;
 		}
-		// テンプレート導入の識別子: 改名対象なら置換(簡易 hygiene)
-		if (rename && Object.prototype.hasOwnProperty.call(rename, nm)) {
-			return new Symbol(rename[nm]);
+		if (literals.indexOf(nm) >= 0) return tmpl;
+		if (scope[nm]) return new Symbol(scope[nm]);
+		var bound = defEnv.tryFind(nm);
+		if (bound !== undefined) {
+			if (!exports[nm]) exports[nm] = { name: sr_fresh_name(nm), val: bound };
+			return new Symbol(exports[nm].name);
 		}
 		return tmpl;
 	}
 	if (tmpl instanceof Array) {
+		var tag = id_name(tmpl[0]);
+		var childScope = {};
+		for (var sk in scope) childScope[sk] = scope[sk];
+
+		if (tag === 'lambda' && tmpl.length >= 2) {
+			sr_bind_params(tmpl[1], pvars, literals, childScope);
+		} else if ((tag === 'let' || tag === 'let*' || tag === 'letrec') && tmpl.length >= 2) {
+			sr_bind_let_bindings(tmpl[1], pvars, literals, childScope);
+		} else if (tag === 'define' && tmpl.length >= 2) {
+			sr_bind_define_target(tmpl[1], pvars, literals, childScope);
+		}
+
 		var out = [];
 		for (var i = 0; i < tmpl.length; i++) {
 			if (i + 1 < tmpl.length && is_ellipsis(tmpl[i + 1])) {
 				var sub = tmpl[i];
 				var evars = ellipsis_vars_in(sub, bindings, {});
 				var names = Object.keys(evars);
-				var n = 0;
-				if (names.length > 0) {
-					n = bindings[names[0]].items.length;
-				}
+				var n = names.length > 0 ? bindings[names[0]].items.length : 0;
 				for (var j = 0; j < n; j++) {
 					var sb = {};
 					for (var key in bindings) sb[key] = bindings[key];
-					for (var t = 0; t < names.length; t++) {
-						sb[names[t]] = bindings[names[t]].items[j];
-					}
-					out.push(sr_expand(sub, sb, rename));
+					for (var t = 0; t < names.length; t++) sb[names[t]] = bindings[names[t]].items[j];
+					out.push(sr_expand_scoped(sub, sb, literals, defEnv, childScope, exports, pvars));
 				}
-				i++; // ... をスキップ
+				i++;
 			} else {
-				out.push(sr_expand(tmpl[i], bindings, rename));
+				out.push(sr_expand_scoped(tmpl[i], bindings, literals, defEnv, childScope, exports, pvars));
 			}
 		}
 		return out;
@@ -2459,21 +2627,31 @@ function sr_expand(tmpl, bindings, rename) {
 	return tmpl;
 }
 
-var sr_gensym_counter = 0;
+function sr_wrap_exports(expanded, exports) {
+	var keys = Object.keys(exports);
+	if (keys.length === 0) return expanded;
+	var binds = [];
+	for (var i = 0; i < keys.length; i++) {
+		binds.push([new Symbol(exports[keys[i]].name), ['macro-capture', exports[keys[i]].val]]);
+	}
+	return ['let', binds, expanded];
+}
 
 // syntax-rules マクロを展開する。form は呼び出し全体 (keyword arg ...)。
 expand_syntax_rules = function (transformer, form) {
 	var literals = transformer[1];
 	var rules = transformer[2];
+	var defEnv = transformer[3];
 	for (var r = 0; r < rules.length; r++) {
 		var pattern = car(rules[r]);
 		var template = car(cdr(rules[r]));
 		var bindings = {};
-		// パターンの先頭(マクロキーワード)は無視し、残りをマッチ
 		var patRest = (pattern instanceof Array) ? pattern.slice(1) : [];
 		var formRest = (form instanceof Array) ? form.slice(1) : [];
 		if (sr_match_list(patRest, formRest, literals, bindings)) {
-			return sr_expand(template, bindings, null);
+			var exports = {};
+			var expanded = sr_expand_scoped(template, bindings, literals, defEnv, {}, exports);
+			return sr_wrap_exports(expanded, exports);
 		}
 	}
 	throw ('no matching syntax-rules clause for ' + scheme_repr(form, true));
@@ -2517,17 +2695,19 @@ function s_apply(procedure, args, k) {
 		return apply_primitive_procedure(procedure, args, k);
 	}
 	if (iscontinuation(procedure)) {
-		// 継続呼び出し: 現在の継続 k を捨て、捕捉済みの継続へジャンプする
 		var capturedK = procedure[1];
+		var targetWind = procedure[2] || [];
 		var value = args.length ? args[0] : undefined;
-		return bounce(function () { return capturedK(value); });
+		return wind_transfer(targetWind, function () {
+			return bounce(function () { return capturedK(value); });
+		});
 	}
 	if (iscompound_procedure(procedure)) {
 		var newEnv = extend_env(
 			procedure_parameters(procedure),
 			args,
 			procedure_environment(procedure));
-		return eval_sequence(procedure_body(procedure), newEnv, k);
+		return eval_body(procedure_body(procedure), newEnv, k);
 	}
 	return error("Unknown procedure type -- APPLY");
 }
@@ -2588,10 +2768,18 @@ Tokenizer.prototype.value = function () {
 	return this.current;
 };
 
+// #; の次の 1 つの datum を読み飛ばし、続くトークン先頭の位置を返す
+Tokenizer.prototype.skip_datum = function (start) {
+	var sub = new Tokenizer(this.code.slice(start));
+	if (sub.value() === '' || sub.value() == null) return start;
+	parse(sub);
+	return start + sub.tokenStart;
+};
+
 Tokenizer.prototype.next = function () {
 	var inQuote = false;
 	var token = "";
-	// 先頭の空白と ; 行コメント(行末まで)を読み飛ばす
+	// 先頭の空白・コメントを読み飛ばす(; / #|...|# / #;datum)
 	while (this.point < this.code.length) {
 		var wc = this.code.charAt(this.point);
 		if (wc === ' ' || wc === '\n' || wc === '\t' || wc === '\r') {
@@ -2601,6 +2789,25 @@ Tokenizer.prototype.next = function () {
 		if (wc === ';') {
 			while (this.point < this.code.length && this.code.charAt(this.point) !== '\n') this.point++;
 			continue;
+		}
+		if (wc === '#' && this.point + 1 < this.code.length) {
+			var nc = this.code.charAt(this.point + 1);
+			if (nc === '|') {
+				this.point += 2;
+				while (this.point + 1 < this.code.length) {
+					if (this.code.charAt(this.point) === '|' && this.code.charAt(this.point + 1) === '#') {
+						this.point += 2;
+						break;
+					}
+					this.point++;
+				}
+				continue;
+			}
+			if (nc === ';') {
+				this.point += 2;
+				this.point = this.skip_datum(this.point);
+				continue;
+			}
 		}
 		break;
 	}

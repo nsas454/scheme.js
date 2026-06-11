@@ -128,12 +128,12 @@ R5RS の標準手続きを幅広くサポートしています。
 - リスト: `car` `cdr` `cons` `list` `append` `length` `reverse` `list-ref` `list-tail` `member`/`memq`/`memv` `assoc`/`assq`/`assv` `caar`〜`cadddr` `set-car!` `set-cdr!` `null?` `pair?` `list?`
 - 高階: `map` `for-each` `apply`
 - 述語: `boolean?` `symbol?` `string?` `char?` `vector?` `procedure?` `not`
-- 文字: `char->integer` `integer->char` `char=?` `char<?` … `char-upcase` `char-downcase` `char-alphabetic?` `char-numeric?` `char-whitespace?`
-- 文字列: `string?` `string-length` `string-ref` `substring` `string-append` `string->list` `list->string` `string->symbol` `symbol->string` `string=?` `string<?` … `make-string` `string`
-- ベクタ: `vector` `make-vector` `vector-ref` `vector-set!` `vector-length` `vector->list` `list->vector` `vector-fill!`
+- 文字: `char->integer` `integer->char` `char=?` `char<?` … `char-ci=?` `char-ci<?` … `char-upcase` `char-downcase` `char-alphabetic?` `char-numeric?` `char-whitespace?`
+- 文字列: `string?` `string-length` `string-ref` `substring` `string-append` `string->list` `list->string` `string->symbol` `symbol->string` `string=?` `string<?` … `string-ci=?` `string-ci<?` … `make-string` `string`
+- ベクタ: `vector` `make-vector` `vector-ref` `vector-set!` `vector-length` `vector->list` `list->vector` `vector-fill!` `vector-copy` `vector-copy!`
 - 制御: `call/cc` / `call-with-current-continuation` `values` `call-with-values` `dynamic-wind` `delay`/`force` `eval` `apply`
-- 入出力: `display` `write` `newline` `write-char` `write-string`
-- その他: `error` `interaction-environment`
+- 入出力: `display` `write` `newline` `write-char` `write-string` `read` `read-char` `peek-char` `read-line` `current-input-port` `current-output-port` `set-current-input-port!` `set-current-output-port!` `open-input-string` `open-output-string` `get-output-string` `call-with-output-string` `with-output-to-string` ほか
+- その他: `error` `interaction-environment` `load`(Node.js のみ)
 - リテラル: 真偽値 `#t` `#f`、文字 `#\a` `#\space` `#\newline` ほか
 
 ## 例
@@ -342,6 +342,30 @@ echo "(+ 1 2)" | node -e "var S=require('./scheme.js/schemInp.js'); console.log(
 (saved 10)                                       ; => 110
 ```
 
+### dynamic-wind と継続
+
+```scheme
+;; 継続による脱出時にも after / before が実行される
+(begin
+  (define w '())
+  (call/cc
+    (lambda (esc)
+      (dynamic-wind
+        (lambda () (set! w (cons 'in w)))
+        (lambda () (esc 'done))
+        (lambda () (set! w (cons 'out w))))))
+  w)   ; => (out in)
+```
+
+### リーダ拡張・内部 define
+
+```scheme
+(+ 1 #|コメント|# 2)        ; => 3
+(+ 1 #;(+ 99) 2)            ; => 3  (#; の次の datum を無視)
+
+((lambda () (define x 10) (+ x 5)))  ; => 15  (内部 define → letrec 変換)
+```
+
 ## R5RS 対応状況
 
 R5RS の機能を段階的に取り込んでいます。多くの標準手続き・特殊形式・データ型(文字・文字列・ベクタ・真偽値)に対応済みですが、以下はまだ未対応/簡易対応です。
@@ -356,16 +380,17 @@ R5RS の機能を段階的に取り込んでいます。多くの標準手続き
 - **ブラウザ REPL UI**(`repl.html` / `scheme_repl_ui()` / `scheme_repl_eval()`)。ターミナル風の対話実行、履歴、複数行入力
 - **本物のペア(cons セル)**。実行時のリストデータは本物の `Pair`(cons セル)で表現し、空リストは `'()`(= `null`)。ドット対 `(a . b)` / 不完全リスト `(a b . c)` の読み取り・表示、`set-car!`/`set-cdr!` による破壊的変更と構造共有、`eq?` によるペアの同一性、循環リストに安全な `list?`/表示、可変長引数 `(lambda args ...)` / `(define (f a . rest) ...)` に対応
 - **シンボルのインターン化**(`(eq? 'a 'a)` ・ `(symbol? 'a)` が正しく動作)
-- **`;` 行コメント**
+- **リーダコメント**(`;` 行コメント、`#| ... |#` ブロックコメント、`#;datum` データコメント)
+- **`syntax-rules` の衛生性**(テンプレート導入束縛の gensym、マクロ定義環境の自由変数の `macro-capture` 保持)
+- **`dynamic-wind` の継続対応**(継続の脱出/再入時に `before`/`after` を wind スタック転送で実行)
+- **内部 `define` の R5RS 準拠**(`lambda`/`begin`/`letrec` 本体を `letrec` 脱糖)
+- **追加標準手続き**(`load`[Node.js]、`string-ci=*`、`char-ci=*`、`vector-copy`/`vector-copy!`、`set-current-input-port!`/`set-current-output-port!`)
 
 簡易対応:
 
 - 複素数の `log`/`asin`/`acos`/`atan` は**主値**(principal value)を返します。`(log -1)` は `i*pi` 相当です。
 - 対話的 stdin は **Node.js のみ**(ブラウザでは stdin なし = EOF)。TTY では `char-ready?` は常に `#t` になり得ます(ブロック読み取り)。
-
-- `syntax-rules` の健全性(hygiene)は簡易対応です。パターン変数は正しく扱いますが、テンプレートが導入する束縛変数の自動改名(完全な変数捕捉回避)は限定的です。
 - 内部の AST(コード)は JavaScript 配列のままで、`quote`/`quasiquote`/`eval` の境界で配列↔ペアを相互変換しています(ユーザが操作するリストデータは常に本物の cons セル)。
-- `dynamic-wind` は通常完了時に `after` を実行しますが、継続による脱出/再入をまたぐ場合の `after`/`before` 実行には未対応です。
 
 備考:
 
