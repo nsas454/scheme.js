@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SICP 演習 REPL — scheme.js</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --sidebar: #0d1117;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --muted: #8b949e;
+      --prompt: #58a6ff;
+      --out: #7ee787;
+      --value: #ffa657;
+      --error: #ff7b72;
+      --accent: #238636;
+      --sicp: #d2a8ff;
+      --active: #1f6feb33;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 0.85rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    header p {
+      margin: 0.15rem 0 0;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    header a {
+      color: var(--prompt);
+      font-size: 0.8rem;
+      text-decoration: none;
+    }
+    header a:hover { text-decoration: underline; }
+    .layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      min-height: 0;
+    }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { max-height: 40vh; border-right: none; border-bottom: 1px solid var(--border); }
+    }
+    .sidebar {
+      border-right: 1px solid var(--border);
+      background: var(--sidebar);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .sidebar-head {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-head label {
+      display: block;
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .sidebar-head select {
+      width: 100%;
+      font: inherit;
+      font-size: 0.85rem;
+      padding: 0.4rem 0.5rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+    }
+    .exercise-list {
+      flex: 1;
+      overflow: auto;
+      padding: 0.35rem 0;
+    }
+    .exercise-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      border: none;
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+      font-size: 0.82rem;
+      padding: 0.55rem 1rem;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+    }
+    .exercise-item:hover { background: #21262d; }
+    .exercise-item.active {
+      background: var(--active);
+      border-left-color: var(--prompt);
+    }
+    .exercise-item .sicp-label {
+      display: block;
+      color: var(--sicp);
+      font-size: 0.72rem;
+      margin-bottom: 0.1rem;
+    }
+    .main {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      min-width: 0;
+    }
+    .exercise-panel {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .exercise-panel h2 {
+      margin: 0 0 0.35rem;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    .exercise-panel .meta {
+      font-size: 0.75rem;
+      color: var(--sicp);
+      margin-bottom: 0.5rem;
+    }
+    .exercise-panel .desc {
+      margin: 0 0 0.75rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .editor-wrap label {
+      display: block;
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    #code-editor {
+      width: 100%;
+      min-height: 140px;
+      max-height: 220px;
+      resize: vertical;
+      font: inherit;
+      font-size: 0.85rem;
+      line-height: 1.45;
+      padding: 0.65rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #010409;
+      color: var(--out);
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.65rem;
+    }
+    .toolbar button {
+      font: inherit;
+      font-size: 0.8rem;
+      padding: 0.4rem 0.85rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #21262d;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .toolbar button.primary {
+      background: var(--accent);
+      border-color: #2ea043;
+      color: #fff;
+    }
+    .toolbar button:hover { filter: brightness(1.08); }
+    #repl-root {
+      flex: 1;
+      min-height: 240px;
+      display: flex;
+      flex-direction: column;
+      border-top: 1px solid var(--border);
+    }
+    #repl-root .scheme-repl { min-height: 240px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>SICP 演習 REPL</h1>
+      <p>Structure and Interpretation of Computer Programs — 章ごとの演習をブラウザで実行</p>
+    </div>
+    <a href="index.html">← デモ一覧</a>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <label for="chapter-select">章</label>
+        <select id="chapter-select"></select>
+      </div>
+      <div class="exercise-list" id="exercise-list"></div>
+    </aside>
+
+    <div class="main">
+      <section class="exercise-panel">
+        <div class="meta" id="ex-meta">演習を選択してください</div>
+        <h2 id="ex-title">—</h2>
+        <p class="desc" id="ex-desc"></p>
+        <div class="editor-wrap">
+          <label for="code-editor">コード</label>
+          <textarea id="code-editor" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+        </div>
+        <div class="toolbar">
+          <button type="button" class="primary" id="btn-run">実行 (Ctrl+Enter)</button>
+          <button type="button" id="btn-repl">REPL に送る</button>
+          <button type="button" id="btn-reset">演習をリセット</button>
+          <button type="button" id="btn-reload">環境リセット (再読み込み)</button>
+        </div>
+      </section>
+      <div id="repl-root"></div>
+    </div>
+  </div>
+
+  <script src="dist/r7rs_large.js"></script>
+  <script src="dist/schemInp.js"></script>
+  <script src="sicp/exercises.js"></script>
+  <script>
+    (function () {
+      var data = window.SICP_EXERCISES;
+      var chapterSelect = document.getElementById('chapter-select');
+      var exerciseList = document.getElementById('exercise-list');
+      var exMeta = document.getElementById('ex-meta');
+      var exTitle = document.getElementById('ex-title');
+      var exDesc = document.getElementById('ex-desc');
+      var codeEditor = document.getElementById('code-editor');
+      var currentExercise = null;
+
+      var repl = scheme_repl_ui(document.getElementById('repl-root'), {
+        welcome: 'SICP 演習 REPL — 左のリストから演習を選び「実行」で評価します。定義はセッション中保持されます。',
+        prompt: 'sicp> '
+      });
+
+      function allExercises(chapter) {
+        var list = [];
+        chapter.sections.forEach(function (sec) {
+          sec.exercises.forEach(function (ex) {
+            list.push({
+              exercise: ex,
+              section: sec,
+              chapter: chapter
+            });
+          });
+        });
+        return list;
+      }
+
+      function flattenAll() {
+        var out = [];
+        data.chapters.forEach(function (ch) {
+          allExercises(ch).forEach(function (item) { out.push(item); });
+        });
+        return out;
+      }
+
+      var flatIndex = flattenAll();
+
+      function findExercise(chapterId, exerciseId) {
+        for (var i = 0; i < flatIndex.length; i++) {
+          if (flatIndex[i].chapter.id === chapterId && flatIndex[i].exercise.id === exerciseId) {
+            return flatIndex[i];
+          }
+        }
+        return null;
+      }
+
+      function selectExercise(item) {
+        if (!item) return;
+        currentExercise = item;
+        var ex = item.exercise;
+        exMeta.textContent = item.chapter.title + ' / ' + item.section.title + ' — ' + ex.sicp;
+        exTitle.textContent = ex.title;
+        exDesc.textContent = ex.description || '';
+        codeEditor.value = ex.code || '';
+
+        document.querySelectorAll('.exercise-item').forEach(function (btn) {
+          btn.classList.toggle('active', btn.dataset.exerciseId === ex.id);
+        });
+
+        var params = new URLSearchParams();
+        params.set('ch', String(item.chapter.id));
+        params.set('ex', ex.id);
+        history.replaceState(null, '', '?' + params.toString());
+      }
+
+      function renderExerciseList(chapter) {
+        exerciseList.innerHTML = '';
+        allExercises(chapter).forEach(function (item) {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'exercise-item';
+          btn.dataset.exerciseId = item.exercise.id;
+          btn.innerHTML = '<span class="sicp-label">' + item.exercise.sicp + '</span>' + item.exercise.title;
+          btn.addEventListener('click', function () { selectExercise(item); });
+          exerciseList.appendChild(btn);
+        });
+      }
+
+      function initChapters() {
+        data.chapters.forEach(function (ch) {
+          var opt = document.createElement('option');
+          opt.value = String(ch.id);
+          opt.textContent = ch.title;
+          chapterSelect.appendChild(opt);
+        });
+        chapterSelect.addEventListener('change', function () {
+          var ch = data.chapters.find(function (c) { return String(c.id) === chapterSelect.value; });
+          renderExerciseList(ch);
+          var first = allExercises(ch)[0];
+          if (first) selectExercise(first);
+        });
+      }
+
+      function runEditorCode() {
+        var code = codeEditor.value;
+        if (!code.trim()) return;
+        var input = repl.getInput();
+        input.value = code;
+        input.dispatchEvent(new Event('input'));
+        repl.submit();
+      }
+
+      function sendToRepl() {
+        var input = repl.getInput();
+        input.value = codeEditor.value;
+        input.focus();
+        input.dispatchEvent(new Event('input'));
+      }
+
+      document.getElementById('btn-run').addEventListener('click', runEditorCode);
+      document.getElementById('btn-repl').addEventListener('click', sendToRepl);
+      document.getElementById('btn-reset').addEventListener('click', function () {
+        if (currentExercise) codeEditor.value = currentExercise.exercise.code || '';
+      });
+      document.getElementById('btn-reload').addEventListener('click', function () {
+        location.reload();
+      });
+
+      codeEditor.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          runEditorCode();
+        }
+      });
+
+      initChapters();
+
+      var params = new URLSearchParams(location.search);
+      var chId = parseInt(params.get('ch') || '1', 10);
+      var exId = params.get('ex');
+      var chapter = data.chapters.find(function (c) { return c.id === chId; }) || data.chapters[0];
+      chapterSelect.value = String(chapter.id);
+      renderExerciseList(chapter);
+      var initial = exId ? findExercise(chapter.id, exId) : allExercises(chapter)[0];
+      selectExercise(initial || allExercises(chapter)[0]);
+    })();
+  </script>
+</body>
+</html>

@@ -30,6 +30,8 @@ scheme.js/
 ├── dist/          # ビルド成果物 (node scripts/build.js)
 ├── examples/      # サンプル .scm
 ├── debug.html     # ステップ実行デバッガ UI
+├── sicp-repl.html # SICP 演習専用 REPL
+├── sicp/          # SICP 演習カタログ (exercises.js)
 ├── index.html     # GitHub Pages トップ (デモへのリンク)
 ├── test/          # テスト (r5rs / js-interop / debugger)
 └── docs/          # ドキュメント (USAGE.md, ARCHITECTURE.md)
@@ -167,7 +169,9 @@ w.next();     // 次へ
 
 ### 1. ブラウザ: `<script type="text/scheme">` で実行する
 
-**オンラインデモ:** [https://nsas454.github.io/scheme.js/](https://nsas454.github.io/scheme.js/) — デモ・REPL・デバッガを GitHub Pages で公開しています。
+**オンラインデモ:** [https://nsas454.github.io/scheme.js/](https://nsas454.github.io/scheme.js/) — デモ・REPL・**SICP 演習 REPL**・デバッガを GitHub Pages で公開しています。
+
+![SICP 演習 REPL のデモ](docs/assets/sicp-repl-demo.gif)
 
 `dist/schemInp.js` を読み込むと、ページ内の `<script type="text/scheme">` ブロックがページ読み込み完了時に上から順に自動実行されます。
 
@@ -224,6 +228,20 @@ var res = scheme_repl_eval('(+ 1 2)');
 ```
 
 > `file://` で開いても REPL は動作します(外部ファイル読み込みは不要)。
+
+### 2b. ブラウザ: SICP 演習 REPL
+
+[SICP](https://mitpress.mit.edu/9780262510875/structure-and-interpretation-of-computer-programs/)（計算機プログラムの構造と解釈）の演習を章ごとに選んで実行できる UI です。
+
+- **オンライン:** [sicp-repl.html](https://nsas454.github.io/scheme.js/sicp-repl.html)
+- 左サイドバーで章・演習を選択
+- コードエディタで編集して **実行** または REPL に送る
+- URL パラメータ `?ch=1&ex=1.7` で演習を直接開けます
+
+```bash
+# デモ GIF の再生成 (playwright + ffmpeg が必要)
+node scripts/record-sicp-gif.mjs
+```
 
 ### 3. ブラウザ: JavaScript の関数として実行する
 

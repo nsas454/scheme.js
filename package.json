@@ -19,7 +19,7 @@
   "scripts": {
     "build": "node scripts/build.js",
     "prepare": "node scripts/build.js",
-    "test": "node scripts/build.js && node test/r5rs/test_r5rs_extra.js && node test/r5rs/test_syntax_rules.js && node test/r5rs/test_r7rs.js && node test/r5rs/test_r7rs_large.js && node test/js-interop/test_js_interop.js && node test/debugger/test_debugger.js"
+    "test": "node scripts/build.js && node test/r5rs/test_r5rs_extra.js && node test/r5rs/test_syntax_rules.js && node test/r5rs/test_r7rs.js && node test/r5rs/test_r7rs_large.js && node test/js-interop/test_js_interop.js && node test/debugger/test_debugger.js && node test/sicp/test_sicp_exercises.js"
   },
   "keywords": [
     "scheme",

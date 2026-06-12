@@ -29,8 +29,8 @@ jobs:
       - name: Prepare site
         run: |
           mkdir site
-          cp index.html demo.html repl.html debug.html site/
-          cp -r dist site/
+          cp index.html demo.html repl.html debug.html sicp-repl.html site/
+          cp -r dist sicp site/
           touch site/.nojekyll
 
       - uses: actions/upload-pages-artifact@v3
