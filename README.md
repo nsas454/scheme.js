@@ -30,6 +30,7 @@ scheme.js/
 ├── dist/          # ビルド成果物 (node scripts/build.js)
 ├── examples/      # サンプル .scm
 ├── debug.html     # ステップ実行デバッガ UI
+├── index.html     # GitHub Pages トップ (デモへのリンク)
 ├── test/          # テスト (r5rs / js-interop / debugger)
 └── docs/          # ドキュメント (USAGE.md, ARCHITECTURE.md)
 ```
@@ -95,25 +96,40 @@ node bin/scheme-js.js examples/hello.scm
 
 ### 0c. JavaScript 相互運用 (Scheme 側)
 
-| 手続き | 説明 |
-| --- | --- |
-| `(js-global)` | `globalThis` 等のホストオブジェクト |
-| `(js-ref obj "prop")` | プロパティ参照 |
-| `(js-set! obj "prop" val)` | プロパティ代入 |
-| `(js-call obj "method" arg ...)` | メソッド呼び出し |
-| `(js-invoke fn arg ...)` | 関数呼び出し |
-| `(js-new Constructor arg ...)` | `new Constructor(...)` |
-| `(js-value? x)` | JS 値ラッパーか |
-| `(scheme->js x)` / `(js->scheme x)` | 値の変換 |
+起動時に `jsdot` / `jslog` / `jsnew` マクロと `js-window` が登録されます。
+
+#### 糖衣構文（自然な操作）
 
 ```scheme
-;; Node.js の console.log を Scheme から呼ぶ
-(js-call (js-ref (js-global) "console") "log" "Hello from Scheme")
+;; プロパティ参照・メソッド呼び出し（文字列不要）
+(define Math (js-ref js-window "Math"))
+(jsdot Math abs -3)              ; => 3
 
-;; JavaScript オブジェクトを生成・操作
-(define o (js-new (js-ref (js-global) "Object")))
-(js-set! o "answer" 42)
-(js-ref o "answer")   ; => 42
+(define o (js-object (cons "name" "scheme-js")))
+(jsdot o name)                   ; => "scheme-js"
+
+(jslog "hello" 42)               ; console.log
+(jsdot! (jsnew Date 0) getFullYear)  ; 引数なしメソッド
+```
+
+#### 低レベル API
+
+| 手続き | 説明 |
+| --- | --- |
+| `js-global` / `js-window` | ホストオブジェクト |
+| `js-ref` / `js-set!` | プロパティ参照・代入 |
+| `js-get` | プロパティチェーン `(js-get obj "a" "b")` |
+| `js-call` / `js-invoke` / `js-apply` | メソッド・関数呼び出し |
+| `js-new` | コンストラクタ |
+| `js-object` / `js-array` | JS オブジェクト・配列を生成 |
+| `js-length` / `js-typeof` / `js-in?` | 配列長・型・キー存在 |
+| `js?` / `js-value?` / `js-null?` | 述語 |
+| `scheme->js` / `js->scheme` | 値の変換 |
+
+```scheme
+(js-get js-window "Math" "PI")
+(js-array 1 2 3)                 ; JS 配列（#<js:Array[3]>）
+(js-object (cons "x" 10))        ; JS オブジェクト
 ```
 
 ### 0d. ステップ実行・デバッガ（学習用）
@@ -150,6 +166,8 @@ w.next();     // 次へ
 | `apply` | 手続き適用（関数名・引数） |
 
 ### 1. ブラウザ: `<script type="text/scheme">` で実行する
+
+**オンラインデモ:** [https://nsas454.github.io/scheme.js/](https://nsas454.github.io/scheme.js/) — デモ・REPL・デバッガを GitHub Pages で公開しています。
 
 `dist/schemInp.js` を読み込むと、ページ内の `<script type="text/scheme">` ブロックがページ読み込み完了時に上から順に自動実行されます。
 

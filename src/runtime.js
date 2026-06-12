@@ -423,3 +423,10 @@ if (typeof module !== 'undefined' && module.exports) {
 	};
 }
 
+// 糖衣構文 (jsdot / jslog / jsnew) を登録
+if (typeof install_js_syntax === 'function') {
+	try { install_js_syntax(); } catch (e) {
+		if (typeof console !== 'undefined') console.warn('install_js_syntax:', e);
+	}
+}
+

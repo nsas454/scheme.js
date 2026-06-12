@@ -10,12 +10,20 @@ function t(label, fn, expected) {
 	console.log((ok ? 'OK  ' : 'NG  ') + label + ' => ' + got + (ok ? '' : ' (expected ' + expected + ')'));
 }
 
-console.log('--- Scheme から JS ---');
+console.log('--- Scheme から JS (低レベル) ---');
 t('js-call Math.abs', () => S.scheme('(js-call (js-ref (js-global) "Math") "abs" -3)'), 3);
 t('js-invoke parseInt', () => S.scheme('(js-invoke (js-ref (js-global) "parseInt") "42")'), 42);
 t('js-set! / js-ref', () => S.scheme('(begin (define o (js-new (js-ref (js-global) "Object"))) (js-set! o "x" 99) (js-ref o "x"))'), 99);
-t('js-new Date', () => S.scheme('(js-call (js-new (js-ref (js-global) "Date") 0) "getFullYear")'), new Date(0).getFullYear());
-t('js-value?', () => S.repr(S.scheme('(js-value? (js-global))')), '#t');
+t('js-get プロパティチェーン', () => S.scheme('(js-get (js-global) "Math" "PI")'), Math.PI);
+t('js-object / js-array', () => S.scheme('(begin (define a (js-array 1 2 3)) (js-length a))'), 3);
+t('js-typeof', () => S.scheme('(js-typeof (js-global))'), 'object');
+t('js-in?', () => S.repr(S.scheme('(js-in? (js-global) "console")')), '#t');
+
+console.log('--- 糖衣構文 (jsdot / jslog / jsnew) ---');
+t('jsdot メソッド呼び出し', () => S.scheme('(jsdot (js-ref (js-global) "Math") abs -3)'), 3);
+t('jsdot プロパティ参照', () => S.scheme('(begin (define o (js-object (cons "n" 7))) (jsdot o n))'), 7);
+t('jsnew + jsdot!', () => S.scheme('(jsdot! (jsnew Date 0) getFullYear)'), new Date(0).getFullYear());
+t('js-window', () => S.scheme('(js? js-window)'), true);
 
 console.log('--- JavaScript から Scheme ---');
 t('Scheme 手続きを JS コールバック', () => {
@@ -26,8 +34,10 @@ t('Scheme 手続きを JS コールバック', () => {
 
 t('toScheme オブジェクト', () => {
 	S.setGlobal('hostObj', { n: 7, tag: 'ok' });
-	return S.scheme('(js-ref hostObj "n")');
+	return S.scheme('(jsdot hostObj n)');
 }, 7);
+
+t('js-apply', () => S.scheme('(js-apply (js-ref (js-global) "parseInt") "99")'), 99);
 
 console.log('--- CLI 引数 ---');
 t('setCommandLineArguments', () => {

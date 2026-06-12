@@ -289,48 +289,76 @@ scheme.js REPL (Ctrl-D で終了)
 
 ## 6. JavaScript 相互運用
 
-### 6.1 Scheme から JavaScript を呼ぶ
+### 6.1 糖衣構文（推奨）
 
-組み込み手続き（グローバルに登録済み）:
+インタプリタ起動時に次のマクロがグローバル登録されます。
 
-| 手続き | 例 |
+| 形式 | 意味 | 例 |
+| --- | --- | --- |
+| `(jsdot obj field)` | プロパティ参照 | `(jsdot o name)` |
+| `(jsdot obj method arg ...)` | メソッド呼び出し | `(jsdot Math abs -3)` |
+| `(jsdot! obj method)` | 引数なしメソッド | `(jsdot! d getTime)` |
+| `(jslog arg ...)` | `console.log` | `(jslog "hi" 42)` |
+| `(jsnew Class arg ...)` | `new Class(...)` | `(jsnew Date 0)` |
+
+`js-window` は `(js-global)` のエイリアスです。
+
+```scheme
+;; 従来（文字列キー）
+(js-call (js-ref js-window "console") "log" "hello")
+
+;; 糖衣構文
+(jslog "hello")
+
+(define cfg (js-object (cons "retries" 3)))
+(jsdot cfg retries)   ; => 3
+```
+
+> **注:** `( . obj field )` のようなドット単体マクロは、パーサのドット対 `(a . b)` と衝突するため **`jsdot`** を使います。
+
+### 6.2 低レベル API（Scheme から JS）
+
+| 手続き | 説明 |
 | --- | --- |
-| `(js-global)` | ホストの `globalThis` |
-| `(js-ref obj "key")` | プロパティ参照 |
-| `(js-set! obj "key" val)` | プロパティ代入 |
-| `(js-call obj "method" arg ...)` | メソッド呼び出し |
-| `(js-invoke fn arg ...)` | 関数呼び出し |
-| `(js-new Class arg ...)` | `new Class(...)` |
-| `(js-value? x)` | JS ラッパーか判定 |
-| `(scheme->js x)` | Scheme 値を JS 側表現に変換してラップ |
-| `(js->scheme x)` | （主に JS API 経由） |
+| `js-global` / `js-window` | ホストの `globalThis` |
+| `js-ref` / `js-set!` | プロパティ参照・代入（キーは文字列・シンボル・数値） |
+| `js-get` | 深い参照 `(js-get obj "document" "body")` |
+| `js-call` | `obj.method(arg...)`（`this` を束縛） |
+| `js-invoke` | 関数を `this` なしで呼ぶ |
+| `js-apply` | 関数に引数リストを渡す |
+| `js-new` | コンストラクタ呼び出し |
+| `js-object` | `(js-object (cons "k" v) ...)` でプレーンオブジェクト |
+| `js-array` | `(js-array 1 2 3)` で JS 配列 |
+| `js-length` | 配列・文字列の `.length` |
+| `js-typeof` / `js-in?` / `js-instanceof?` | 型・キー・instanceof |
+| `js?` / `js-value?` / `js-null?` | 述語 |
+| `js-unwrap` | ラッパーから生 JS 値を取り出す |
+| `scheme->js` / `js->scheme` | 値変換 |
 
-#### console.log する
-
-```scheme
-(js-call (js-ref (js-global) "console") "log" "Hello from Scheme")
-```
-
-#### オブジェクトを作って読み書き
-
-```scheme
-(define o (js-new (js-ref (js-global) "Object")))
-(js-set! o "name" "scheme-js")
-(js-set! o "version" 2)
-(js-ref o "name")    ; => "scheme-js"
-```
-
-#### 配列・JSON 風データ
+#### 例: プロパティチェーン
 
 ```scheme
-;; parseInt は js-invoke（第一引数が関数そのもの）
-(js-invoke (js-ref (js-global) "parseInt") "42")   ; => 42
-
-;; Math.abs
-(js-call (js-ref (js-global) "Math") "abs" -3)   ; => 3
+(js-get js-window "Math" "PI")           ; => 3.14159...
+(js-get js-window "document" "title")    ; ブラウザのみ
 ```
 
-### 6.2 JavaScript から Scheme を呼ぶ
+#### 例: オブジェクト・配列の生成
+
+```scheme
+(define users (js-array "alice" "bob"))
+(js-length users)                        ; => 2
+
+(define point (js-object (cons "x" 10) (cons "y" 20)))
+(jsdot point x)                          ; => 10
+```
+
+#### 例: console（低レベル）
+
+```scheme
+(js-call (js-ref js-window "console") "log" "Hello")
+```
+
+### 6.3 JavaScript から Scheme を呼ぶ
 
 #### JS オブジェクトを Scheme に渡す
 
@@ -340,9 +368,9 @@ const S = require('scheme-js');
 S.setGlobal('config', { host: 'localhost', port: 8080 });
 
 S.scheme(`
-  (display (js-ref config "host"))
+  (display (jsdot config host))
   (newline)
-  (+ (js-ref config "port") 92)
+  (+ (jsdot config port) 92)
 `);   // => 8900
 ```
 
