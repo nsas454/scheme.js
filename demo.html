@@ -11,8 +11,9 @@
 	<p>下の枠に &lt;script type="text/scheme"&gt; の (display ...) の出力が表示されます。</p>
 	<pre id="scheme-output" style="background:#111;color:#0f0;padding:1em;"></pre>
 
-	<!-- インタプリタ本体 -->
-	<script src="schemInp.js"></script>
+	<!-- インタプリタ本体 (R7RS-large 拡張を先に読み込む) -->
+	<script src="dist/r7rs_large.js"></script>
+	<script src="dist/schemInp.js"></script>
 
 	<!-- Scheme コードを直接書いて実行 -->
 	<script type="text/scheme">

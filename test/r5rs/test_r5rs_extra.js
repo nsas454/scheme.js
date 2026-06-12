@@ -1,4 +1,4 @@
-const S = require('./schemInp.js');
+const S = require('../../dist/schemInp.js');
 let pass = 0, fail = 0;
 function t(label, code, expected) {
 	let got;

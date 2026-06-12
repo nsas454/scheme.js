@@ -1,0 +1,11 @@
+{
+  "name": "scheme.js",
+  "version": "2.0.0",
+  "description": "Scheme interpreter in JavaScript",
+  "main": "dist/schemInp.js",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "test": "node scripts/build.js && node test/r5rs/test_r5rs_extra.js && node test/r5rs/test_syntax_rules.js && node test/r5rs/test_r7rs.js && node test/r5rs/test_r7rs_large.js"
+  },
+  "license": "MIT"
+}

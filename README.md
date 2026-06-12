@@ -12,15 +12,42 @@ JavaScript で実装した Scheme インタプリタです。
 - トランポリン駆動によりスタックを消費しないため、深い再帰でもオーバーフローしにくい
 - ブラウザでもサーバ(Node.js)でも動作
 
+## プロジェクト構成
+
+```
+scheme.js/
+├── src/           # ソース (編集はここ)
+│   ├── parser.js      字句解析・S式パース
+│   ├── evaluator.js   CPS 評価器・マクロ
+│   ├── env.js         環境・クロージャー
+│   ├── primitives.js  組み込み手続き・I/O
+│   ├── numbers.js     数値タワー
+│   └── runtime.js     エントリ・REPL
+├── dist/          # ビルド成果物 (node scripts/build.js)
+├── test/          # テスト (r5rs / sicp / js-interop)
+└── docs/          # ドキュメント
+```
+
+詳細は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) を参照してください。
+
+### ビルド
+
+```bash
+node scripts/build.js   # src/ → dist/schemInp.js
+npm test                # ビルド + 全テスト
+```
+
 ## 使い方
 
 ### 1. ブラウザ: `<script type="text/scheme">` で実行する
 
-`schemInp.js` を読み込むと、ページ内の `<script type="text/scheme">` ブロックがページ読み込み完了時に上から順に自動実行されます。
+`dist/schemInp.js` を読み込むと、ページ内の `<script type="text/scheme">` ブロックがページ読み込み完了時に上から順に自動実行されます。
 
 ```html
-<!-- インタプリタ本体を読み込む -->
-<script src="scheme.js/schemInp.js"></script>
+<!-- R7RS-large 拡張 (任意) -->
+<script src="dist/r7rs_large.js"></script>
+<!-- インタプリタ本体 -->
+<script src="dist/schemInp.js"></script>
 
 <!-- (任意) display の出力先。id="scheme-output" の要素があればそこにも出力される -->
 <pre id="scheme-output"></pre>
@@ -40,11 +67,11 @@ JavaScript で実装した Scheme インタプリタです。
 
 > 注意: `src` での外部ファイル読み込みは同期 XHR を使うため、`file://` で直接開くとブラウザの CORS 制約で読めないことがあります。その場合はインライン記述を使うか、簡易 HTTP サーバ(例: `python3 -m http.server`)経由で開いてください。インラインの `<script type="text/scheme">` はサーバなしでも動作します。
 
-動作確認用の `scheme.js/demo.html` を用意しています。ブラウザで開くと実行結果が表示されます。
+動作確認用の `demo.html` を用意しています。ブラウザで開くと実行結果が表示されます。
 
 ### 2. ブラウザ: REPL UI で対話実行する
 
-`scheme.js/repl.html` をブラウザで開くと、ターミナル風の REPL で Scheme を対話的に実行できます。
+`repl.html` をブラウザで開くと、ターミナル風の REPL で Scheme を対話的に実行できます。
 
 - **Enter** — 式を実行(括弧が閉じていなければ複数行入力に続行)
 - **Shift+Enter** — 改行
@@ -52,7 +79,8 @@ JavaScript で実装した Scheme インタプリタです。
 - `define` などの定義はセッション中保持されます
 
 ```html
-<script src="scheme.js/schemInp.js"></script>
+<script src="dist/r7rs_large.js"></script>
+<script src="dist/schemInp.js"></script>
 <div id="my-repl"></div>
 <script>
   scheme_repl_ui(document.getElementById('my-repl'));
@@ -74,7 +102,8 @@ var res = scheme_repl_eval('(+ 1 2)');
 `schemInp.js` を読み込むと、グローバルに `scheme()` 関数が定義されます。文字列で渡したコードを評価し、最後の式の結果を返します。
 
 ```html
-<script src="scheme.js/schemInp.js"></script>
+<script src="dist/r7rs_large.js"></script>
+<script src="dist/schemInp.js"></script>
 <script>
   var result = scheme("(+ 1 2 3)"); // => 6
   console.log(result);
@@ -84,7 +113,7 @@ var res = scheme_repl_eval('(+ 1 2)');
 ### 4. Node.js から使う
 
 ```js
-const { scheme } = require('./scheme.js/schemInp.js');
+const { scheme } = require('./dist/schemInp.js');
 
 console.log(scheme('(+ 1 2 3)'));                  // 6
 console.log(scheme('(define (f x) (* x x)) (f 9)'));// 81
@@ -290,9 +319,9 @@ p                     ; => (x . z)
 ### 対話 REPL(Node.js)
 
 ```bash
-node scheme.js/schemInp.js
+node dist/schemInp.js
 # または
-node -e "require('./scheme.js/schemInp.js').scheme_repl()"
+node -e "require('./dist/schemInp.js').scheme_repl()"
 ```
 
 ```scheme
@@ -304,7 +333,7 @@ node -e "require('./scheme.js/schemInp.js').scheme_repl()"
 パイプからの利用:
 
 ```bash
-echo "(+ 1 2)" | node -e "var S=require('./scheme.js/schemInp.js'); console.log(S.repr(S.scheme('(eval (read))')))"
+echo "(+ 1 2)" | node -e "var S=require('./dist/schemInp.js'); console.log(S.repr(S.scheme('(eval (read))')))"
 ; => 3
 ```
 
@@ -366,6 +395,47 @@ echo "(+ 1 2)" | node -e "var S=require('./scheme.js/schemInp.js'); console.log(
 ((lambda () (define x 10) (+ x 5)))  ; => 15  (内部 define → letrec 変換)
 ```
 
+### R7RS ライブラリ・拡張構文
+
+```scheme
+;; ライブラリ定義と import
+(define-library (mylib)
+  (export double)
+  (import (scheme base))
+  (begin (define (double x) (* x 2))))
+(import (mylib))
+(double 10)   ; => 20
+
+;; case-lambda
+((case-lambda (() 'none) ((x) x)))       ; => none
+((case-lambda (() 'none) ((x) x)) 42)   ; => 42
+
+;; define-values / let-values
+(define-values (a b) (values 1 2))
+(let-values (((x y) (values 3 4))) (+ x y))  ; => 7
+
+;; guard / raise
+(guard (e (#t 'ok)) (raise 'err))   ; => ok
+
+;; define-record-type
+(define-record-type point
+  (make-point x y)
+  point?
+  (x point-x)
+  (y point-y point-y-set!))
+
+;; ハッシュテーブル
+(define ht (make-hash-table))
+(hash-table-set! ht 'key 42)
+
+;; cond-expand
+(cond-expand (r7rs 'yes) (else 'no))  ; => yes
+
+;; (scheme list) ライブラリ
+(import (scheme list))
+(filter (lambda (x) (> x 1)) '(1 2 3))  ; => (2 3)
+```
+
 ## R5RS 対応状況
 
 R5RS の機能を段階的に取り込んでいます。多くの標準手続き・特殊形式・データ型(文字・文字列・ベクタ・真偽値)に対応済みですが、以下はまだ未対応/簡易対応です。
@@ -376,7 +446,7 @@ R5RS の機能を段階的に取り込んでいます。多くの標準手続き
 - **数値タワー**(`exact` な多倍長整数 / 有理数、`inexact` な浮動小数、**複素数**。`exact?`/`inexact?`/`exact->inexact`/`inexact->exact`、有理数演算、基数接頭辞 `#x`/`#o`/`#b`/`#d`、正確さ接頭辞 `#e`/`#i`、`#e1.5 → 3/2` など)
 - **複素数**(`3+4i` / `+i` / `2i` などのリテラル、`make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/`angle`、四則演算、`(sqrt -1) → i`、超越関数 `exp`/`log`/`sin`/`cos`/`tan`/`asin`/`acos`/`atan`/`expt` の複素数引数)
 - **I/O ポート**(文字列ポート `open-input-string`/`open-output-string`/`get-output-string`、`read`/`read-char`/`peek-char`/`read-line`、`call-with-output-string`/`with-output-to-string`、`display`/`write`/`newline` 等のポート引数。ファイルポート `open-input-file`/`open-output-file`/`call-with-input-file`/`call-with-output-file`/`with-output-to-file`/`with-input-from-file` は **Node.js のみ**)
-- **対話的 stdin(Node.js)**。既定の入力ポートが標準入力に接続され、`(read)` / `(read-line)` / `(eval (read))` が利用可能。`node schemInp.js` または `scheme_repl()` で REPL 起動
+- **対話的 stdin(Node.js)**。既定の入力ポートが標準入力に接続され、`(read)` / `(read-line)` / `(eval (read))` が利用可能。`node dist/schemInp.js` または `scheme_repl()` で REPL 起動
 - **ブラウザ REPL UI**(`repl.html` / `scheme_repl_ui()` / `scheme_repl_eval()`)。ターミナル風の対話実行、履歴、複数行入力
 - **本物のペア(cons セル)**。実行時のリストデータは本物の `Pair`(cons セル)で表現し、空リストは `'()`(= `null`)。ドット対 `(a . b)` / 不完全リスト `(a b . c)` の読み取り・表示、`set-car!`/`set-cdr!` による破壊的変更と構造共有、`eq?` によるペアの同一性、循環リストに安全な `list?`/表示、可変長引数 `(lambda args ...)` / `(define (f a . rest) ...)` に対応
 - **シンボルのインターン化**(`(eq? 'a 'a)` ・ `(symbol? 'a)` が正しく動作)
@@ -395,6 +465,64 @@ R5RS の機能を段階的に取り込んでいます。多くの標準手続き
 備考:
 
 - 末尾呼び出しはトランポリン + CPS により実質的にスタック安全(末尾位置の再帰は定数スタック)です。
+
+## R7RS 対応状況
+
+R7RS small の主要機能と、large の一部ライブラリに対応しています。
+
+対応済み (R7RS small):
+
+- **`define-library` / `import` / `export`** — ライブラリ定義と名前付き import(`only:` / `except:` 修飾子)
+- **組み込みライブラリ** — `(scheme base)` `(scheme case-lambda)` `(scheme hash-table)` `(scheme list)`
+- **`case-lambda`** — 引数個数別の手続き定義
+- **`define-values` / `let-values` / `let*-values`**
+- **`cond-expand`** — 機能識別子 `scheme` `r7rs` `r5rs` `scheme-js` `node` `unix` `windows`
+- **`include` / `include-ci`** — ファイル取り込み(Node.js のみ)
+- **`guard` / `raise`** — 例外処理(条件オブジェクト)
+- **`define-record-type`** — レコード型(コンストラクタ・述語・アクセサ・mutator)
+- **`cond` の `=>` 節** — `(test => proc)` 形式
+
+対応済み (R7RS large — Red Edition 中心):
+
+`src/r7rs_large.js` が Node.js では自動ロード、ブラウザでは `dist/r7rs_large.js` を `dist/schemInp.js` より先に読み込んでください。
+
+| ライブラリ | 主な手続き |
+| --- | --- |
+| `(scheme bytevector)` | `make-bytevector` `bytevector-u8-ref/set!` `utf8->string` `string->utf8` 等 |
+| `(scheme unicode)` | `string-normalize-nfd/nfc/nfkd/nfkc` `string-foldcase` `string-titlecase` 等 |
+| `(scheme string)` | `string-map` `string-for-each` `string-index` `string-skip` `string-count` 等 |
+| `(scheme vector)` | `vector-map` `vector-for-each` `vector-append` `vector->string` 等 |
+| `(scheme list)` | SRFI 1 拡張: `take` `drop` `remove` `partition` `reduce` `list-tabulate` 等 |
+| `(scheme hash-table)` | SRFI 125 拡張: `hash-table-size` `hash-table-clear!` `hash-table-update!` 等 |
+| `(scheme sort)` | `list-sort` `vector-sort` `sorted?` |
+| `(scheme division)` | `div` `mod` `div-and-mod` `div0` `mod0` `exact-integer-sqrt` |
+| `(scheme inexact)` | `finite?` `infinite?` `nan?` `+nan.0` `+inf.0` `-inf.0` |
+| `(scheme random)` | `random-integer` `random-real` `random-sample` |
+| `(scheme process-context)` | `command-line` `get-environment-variable` `exit` |
+| `(scheme time)` | `current-second` `jiffies` |
+| `(scheme box)` | `box` `unbox` `set-box!` |
+| `(scheme generator)` | `make-iota-generator` `g-collect` `g-for-each` 等 |
+| `(scheme stream)` | `stream-cons` `stream-car/cdr` `stream-null?` 等 |
+| `(scheme text)` | SRFI 135 抜粋: `string->text` `text->string` `text-ref` 等 |
+| `(scheme write)` | `write-simple` + 既存 write/display |
+| `(scheme char)` `(scheme cxr)` `(scheme complex)` `(scheme eval)` `(scheme read)` `(scheme file)` `(scheme lazy)` `(scheme load)` | 既存手続きの再 export |
+| `(scheme red)` | 上記 Red Edition ライブラリの統合 import |
+
+未対応 / 簡易対応:
+
+- `(scheme ilist)` `(scheme rlist)` `(scheme ideque)` `(scheme set)` `(scheme charset)` `(scheme comparator)` 等の Red Edition 残ライブラリ
+- `string-fill!` / `string-set!` — JavaScript 文字列は不変のため完全な破壊的操作には非対応
+- `#u8(...)` リテラル読み取り(手続きによる生成は可)
+- `identifier-syntax` / `er-macro-transformer` 等の低レベルマクロ
+
+テスト:
+
+```bash
+node scripts/build.js
+node test/r5rs/test_r7rs.js
+node test/r5rs/test_r7rs_large.js
+node test/r5rs/test_r5rs_extra.js
+```
 
 ## ライセンス
 
