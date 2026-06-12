@@ -43,6 +43,10 @@ var SBytevector, Box, SText;
 	for (var i in primitive_procedures) {
 		regist_global(i, ["primitive", primitive_procedures[i]]);
 	}
+	// r7rs_large は別モジュールのため CLI 引数上書きはここで差し替える
+	primitive_procedures['command-line'] = function () { return scheme_get_command_line(); };
+	regist_global('command-line', ['primitive', primitive_procedures['command-line']]);
+	patch_scheme_repr_for_js();
 	regist_global('#t', true);
 	regist_global('#f', false);
 	regist_global('nil', null);

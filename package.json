@@ -1,11 +1,37 @@
 {
-  "name": "scheme.js",
-  "version": "2.0.0",
-  "description": "Scheme interpreter in JavaScript",
-  "main": "dist/schemInp.js",
+  "name": "scheme-js",
+  "version": "2.1.0",
+  "description": "Scheme interpreter for Node.js and browsers (R5RS / R7RS)",
+  "main": "index.js",
+  "bin": {
+    "scheme-js": "./bin/scheme-js.js"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./dist/schemInp.js": "./dist/schemInp.js",
+    "./dist/r7rs_large.js": "./dist/r7rs_large.js"
+  },
+  "files": [
+    "index.js",
+    "bin/",
+    "dist/"
+  ],
   "scripts": {
     "build": "node scripts/build.js",
-    "test": "node scripts/build.js && node test/r5rs/test_r5rs_extra.js && node test/r5rs/test_syntax_rules.js && node test/r5rs/test_r7rs.js && node test/r5rs/test_r7rs_large.js"
+    "prepare": "node scripts/build.js",
+    "test": "node scripts/build.js && node test/r5rs/test_r5rs_extra.js && node test/r5rs/test_syntax_rules.js && node test/r5rs/test_r7rs.js && node test/r5rs/test_r7rs_large.js && node test/js-interop/test_js_interop.js && node test/debugger/test_debugger.js"
   },
-  "license": "MIT"
+  "keywords": [
+    "scheme",
+    "lisp",
+    "interpreter",
+    "r5rs",
+    "r7rs",
+    "repl",
+    "macro"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=14"
+  }
 }

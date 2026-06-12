@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>scheme.js デバッガ</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: ui-monospace, monospace; margin: 0; background: #1a1b26; color: #c0caf5; }
+    header { padding: 12px 16px; background: #24283b; border-bottom: 1px solid #414868; }
+    header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+    .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 0; min-height: calc(100vh - 48px); }
+    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+    .panel { padding: 12px; border-right: 1px solid #414868; overflow: auto; }
+    .panel h2 { margin: 0 0 8px; font-size: 0.85rem; color: #7aa2f7; text-transform: uppercase; letter-spacing: 0.05em; }
+    textarea { width: 100%; min-height: 120px; background: #16161e; color: #9ece6a; border: 1px solid #414868; border-radius: 4px; padding: 8px; font: inherit; resize: vertical; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+    button { background: #414868; color: #c0caf5; border: none; border-radius: 4px; padding: 6px 12px; font: inherit; cursor: pointer; }
+    button:hover { background: #565f89; }
+    button.primary { background: #7aa2f7; color: #1a1b26; }
+    button.primary:hover { background: #89b4fa; }
+    pre { background: #16161e; border: 1px solid #414868; border-radius: 4px; padding: 10px; margin: 0; white-space: pre-wrap; word-break: break-all; font-size: 0.9rem; }
+    .current { border-color: #7aa2f7; }
+    .meta { color: #565f89; font-size: 0.8rem; margin-bottom: 4px; }
+    .phase-eval { color: #9ece6a; }
+    .phase-apply { color: #e0af68; }
+    .phase-return { color: #bb9af7; }
+    #event-list { max-height: 40vh; overflow: auto; }
+    .event { padding: 6px 8px; border-bottom: 1px solid #292e42; cursor: pointer; font-size: 0.85rem; }
+    .event:hover { background: #24283b; }
+    .event.active { background: #364a7e; }
+    #env-table { font-size: 0.85rem; }
+    #env-table td { padding: 2px 8px; vertical-align: top; }
+    #env-table td:first-child { color: #7dcfff; }
+    #status { margin-top: 8px; color: #a9b1d6; }
+  </style>
+</head>
+<body>
+  <header><h1>scheme.js デバッガ — 評価過程をステップ実行</h1></header>
+  <div class="layout">
+    <div class="panel">
+      <h2>ソース</h2>
+      <textarea id="source">(define (fact n)
+  (if (&lt; n 2)
+      1
+      (* n (fact (- n 1)))))
+(fact 4)</textarea>
+      <div class="toolbar">
+        <button class="primary" id="btn-start">開始 / リセット</button>
+        <button id="btn-step">ステップ (F10)</button>
+        <button id="btn-over">ステップオーバー</button>
+        <button id="btn-out">ステップアウト</button>
+        <button id="btn-cont">続行 (F5)</button>
+        <button id="btn-trace">全トレース記録</button>
+      </div>
+      <div id="status">準備完了</div>
+    </div>
+    <div class="panel">
+      <h2>現在のステップ</h2>
+      <div class="meta" id="step-meta"></div>
+      <pre class="current" id="step-exp">—</pre>
+      <h2>環境 (束縛)</h2>
+      <table id="env-table"><tbody></tbody></table>
+      <h2>イベント履歴</h2>
+      <div id="event-list"></div>
+    </div>
+  </div>
+  <script src="dist/r7rs_large.js"></script>
+  <script src="dist/schemInp.js"></script>
+  <script>
+    var session = null;
+    var traceData = null;
+    var traceIndex = 0;
+
+    function $(id) { return document.getElementById(id); }
+
+    function renderEvent(evt, active) {
+      if (!evt) return;
+      var cls = 'phase-' + evt.phase;
+      var line = evt.source || evt.procedure || '';
+      if (evt.phase === 'apply') line = 'apply ' + evt.procedure + ' ' + (evt.arguments || []).join(' ');
+      if (evt.phase === 'return') line = '=&gt; ' + evt.value + '  (' + evt.source + ')';
+      $('step-meta').innerHTML = '<span class="' + cls + '">' + evt.phase + '</span> depth=' + (evt.depth || '') + ' type=' + (evt.type || '');
+      $('step-exp').textContent = line;
+
+      var tbody = $('env-table').querySelector('tbody');
+      tbody.innerHTML = '';
+      if (evt.env) {
+        evt.env.forEach(function (frame, fi) {
+          Object.keys(frame).forEach(function (name) {
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td>' + (fi === 0 ? name : '  ' + name) + '</td><td>' + frame[name] + '</td>';
+            tbody.appendChild(tr);
+          });
+        });
+      }
+    }
+
+    function renderEventList(events, highlightId) {
+      var list = $('event-list');
+      list.innerHTML = '';
+      events.forEach(function (evt) {
+        var div = document.createElement('div');
+        div.className = 'event' + (evt.id === highlightId ? ' active' : '');
+        var label = evt.phase + ' [' + (evt.type || '') + '] ' + (evt.source || evt.procedure || evt.value || '');
+        div.textContent = label;
+        div.onclick = function () { renderEvent(evt, true); };
+        list.appendChild(div);
+      });
+    }
+
+    function updateStatus() {
+      if (session) {
+        var st = session.getState();
+        $('status').textContent = 'status=' + st.status + ' events=' + st.eventCount +
+          (st.result ? ' result=' + st.result : '');
+        renderEvent(st.current, true);
+        renderEventList(session.getEvents(), st.current && st.current.id);
+      } else if (traceData) {
+        $('status').textContent = 'trace mode: ' + (traceIndex + 1) + '/' + traceData.events.length +
+          (traceData.result !== undefined ? ' result=' + scheme_repr(traceData.result, true) : '');
+      }
+    }
+
+    function startDebug() {
+      traceData = null;
+      session = scheme_debug_start($('source').value, { mode: 'step-in' });
+      session.start();
+      updateStatus();
+    }
+
+    $('btn-start').onclick = startDebug;
+    $('btn-step').onclick = function () {
+      if (!session) startDebug(); else { session.step(); updateStatus(); }
+    };
+    $('btn-over').onclick = function () {
+      if (!session) { session = scheme_debug_start($('source').value); session.stepOverDepth = 1; session.start(); }
+      else session.stepOver();
+      updateStatus();
+    };
+    $('btn-out').onclick = function () {
+      if (session) session.stepOut();
+      updateStatus();
+    };
+    $('btn-cont').onclick = function () {
+      if (!session) startDebug();
+      session.continue();
+      updateStatus();
+    };
+    $('btn-trace').onclick = function () {
+      session = null;
+      traceData = scheme_debug_trace($('source').value);
+      traceIndex = 0;
+      renderEvent(traceData.events[0]);
+      renderEventList(traceData.events, 0);
+      $('status').textContent = 'trace: ' + traceData.events.length + ' events, result=' +
+        scheme_repr(traceData.result, true);
+    };
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'F10') { e.preventDefault(); $('btn-step').click(); }
+      if (e.key === 'F5') { e.preventDefault(); $('btn-cont').click(); }
+      if (e.key === 'ArrowRight' && traceData) {
+        traceIndex = Math.min(traceIndex + 1, traceData.events.length - 1);
+        renderEvent(traceData.events[traceIndex]);
+        renderEventList(traceData.events, traceIndex);
+      }
+      if (e.key === 'ArrowLeft' && traceData) {
+        traceIndex = Math.max(traceIndex - 1, 0);
+        renderEvent(traceData.events[traceIndex]);
+        renderEventList(traceData.events, traceIndex);
+      }
+    });
+  </script>
+</body>
+</html>

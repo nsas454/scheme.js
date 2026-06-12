@@ -5,7 +5,15 @@
 //   返り値は必ず Bounce(またはトップレベル halt が返す最終値)で、
 //   トランポリンが反復実行することでスタックを消費せず駆動する。
 // ==================================================================
+
+function debug_eval_enter(exp, env, k) { return null; }
+function debug_apply_event(proc, args) {}
+function debug_wrap_k(exp, env, k) { return k; }
+
 function seval(exp, env, k) {
+	var pauseB = debug_eval_enter(exp, env, k);
+	if (pauseB) return pauseB;
+	k = debug_wrap_k(exp, env, k);
 	// 真偽値・空リストはそのまま
 	if (typeof exp === 'boolean' || exp == null) {
 		return bounce(function () { return k(exp); });
@@ -885,6 +893,7 @@ eval_application = function (exp, env, k) {
 };
 
 function s_apply(procedure, args, k) {
+	debug_apply_event(procedure, args);
 	if (isprimitive_procedure(procedure)) {
 		return apply_primitive_procedure(procedure, args, k);
 	}

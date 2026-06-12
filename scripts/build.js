@@ -19,6 +19,8 @@ const MODULES = [
 	'io.js',
 	'r7rs.js',
 	'evaluator.js',
+	'js_interop.js',
+	'debugger.js',
 	'init.js',
 	'parser.js',
 	'runtime.js'

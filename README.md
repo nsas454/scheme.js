@@ -16,19 +16,25 @@ JavaScript で実装した Scheme インタプリタです。
 
 ```
 scheme.js/
+├── index.js       # npm エントリ (require('scheme-js'))
+├── bin/scheme-js.js   # CLI
 ├── src/           # ソース (編集はここ)
 │   ├── parser.js      字句解析・S式パース
 │   ├── evaluator.js   CPS 評価器・マクロ
 │   ├── env.js         環境・クロージャー
 │   ├── primitives.js  組み込み手続き・I/O
+│   ├── js_interop.js  JavaScript 相互運用
+│   ├── debugger.js    ステップ実行・評価トレース
 │   ├── numbers.js     数値タワー
 │   └── runtime.js     エントリ・REPL
 ├── dist/          # ビルド成果物 (node scripts/build.js)
-├── test/          # テスト (r5rs / sicp / js-interop)
-└── docs/          # ドキュメント
+├── examples/      # サンプル .scm
+├── debug.html     # ステップ実行デバッガ UI
+├── test/          # テスト (r5rs / js-interop / debugger)
+└── docs/          # ドキュメント (USAGE.md, ARCHITECTURE.md)
 ```
 
-詳細は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) を参照してください。
+詳細な使い方は **[docs/USAGE.md](docs/USAGE.md)** を参照してください。アーキテクチャは [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) です。
 
 ### ビルド
 
@@ -38,6 +44,110 @@ npm test                # ビルド + 全テスト
 ```
 
 ## 使い方
+
+> **詳細ガイド:** [docs/USAGE.md](docs/USAGE.md) に npm / CLI / ブラウザ / REPL / JS 連携 / デバッガの操作手順をまとめています。以下はクイックリファレンスです。
+
+### 0. npm パッケージとして使う
+
+```bash
+npm install scheme-js
+```
+
+```js
+const {
+  scheme, scheme_run, repr,
+  toScheme, fromScheme,
+  setGlobal, getGlobal,
+  setCommandLineArguments
+} = require('scheme-js');
+
+console.log(scheme('(+ 1 2 3)'));           // 6
+scheme_run('(display "hello\\n")');          // display 出力 + 例外時 throw
+
+// JavaScript オブジェクトを Scheme へ渡す
+setGlobal('config', { retries: 3 });
+scheme('(js-ref config "retries")');        // 3
+
+// Scheme 手続きを JavaScript 関数として使う
+scheme('(define (double x) (* x 2))');
+const double = fromScheme(getGlobal('double'));
+double(21);                                 // 42
+```
+
+### 0b. CLI: `.scm` ファイルを実行
+
+グローバルインストール後:
+
+```bash
+npm install -g scheme-js
+scheme-js examples/hello.scm
+scheme-js -e "(display (+ 1 2))"    # => 3
+scheme-js                           # 対話 REPL
+```
+
+ローカル開発時:
+
+```bash
+node bin/scheme-js.js examples/hello.scm
+```
+
+スクリプト引数は R7RS の `(import (scheme process-context))` の `command-line` で参照できます。
+
+### 0c. JavaScript 相互運用 (Scheme 側)
+
+| 手続き | 説明 |
+| --- | --- |
+| `(js-global)` | `globalThis` 等のホストオブジェクト |
+| `(js-ref obj "prop")` | プロパティ参照 |
+| `(js-set! obj "prop" val)` | プロパティ代入 |
+| `(js-call obj "method" arg ...)` | メソッド呼び出し |
+| `(js-invoke fn arg ...)` | 関数呼び出し |
+| `(js-new Constructor arg ...)` | `new Constructor(...)` |
+| `(js-value? x)` | JS 値ラッパーか |
+| `(scheme->js x)` / `(js->scheme x)` | 値の変換 |
+
+```scheme
+;; Node.js の console.log を Scheme から呼ぶ
+(js-call (js-ref (js-global) "console") "log" "Hello from Scheme")
+
+;; JavaScript オブジェクトを生成・操作
+(define o (js-new (js-ref (js-global) "Object")))
+(js-set! o "answer" 42)
+(js-ref o "answer")   ; => 42
+```
+
+### 0d. ステップ実行・デバッガ（学習用）
+
+評価器にフックし、**どの式がいつ評価・適用されたか**を追跡できます。
+
+**ブラウザ UI**: `debug.html` を開く（F10=ステップ、F5=続行）
+
+**JavaScript API**:
+
+```js
+const { scheme_debug_start, scheme_debug_trace, scheme_trace_walker } = require('scheme-js');
+
+// ステップ実行
+const sess = scheme_debug_start('(+ 1 2)');
+sess.start();                    // 最初の式で停止
+console.log(sess.currentEvent);  // { phase: 'eval', source: '(+ 1 2)', env: [...] }
+sess.step();                     // 1 式進む
+sess.continue();                 // 最後まで実行
+
+// 全トレースを記録して再生
+const trace = scheme_debug_trace('(define x 5) (+ x 1)');
+const w = scheme_trace_walker(trace);
+w.current();  // 最初のイベント
+w.next();     // 次へ
+```
+
+記録されるイベント:
+
+| phase | 内容 |
+| --- | --- |
+| `eval` | 評価開始（式・型・環境スナップショット） |
+| `return` | 評価完了（戻り値） |
+| `apply` | 手続き適用（関数名・引数） |
 
 ### 1. ブラウザ: `<script type="text/scheme">` で実行する
 
@@ -113,7 +223,8 @@ var res = scheme_repl_eval('(+ 1 2)');
 ### 4. Node.js から使う
 
 ```js
-const { scheme } = require('./dist/schemInp.js');
+const { scheme, repr } = require('scheme-js');
+// またはローカル clone: require('./index.js')
 
 console.log(scheme('(+ 1 2 3)'));                  // 6
 console.log(scheme('(define (f x) (* x x)) (f 9)'));// 81

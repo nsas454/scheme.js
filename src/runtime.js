@@ -28,6 +28,56 @@ scheme = function (code) {
 	}
 	return result;
 };
+
+// 評価して値を返す。エラー時は例外を投げ、display 出力は stdout へ流す。
+scheme_run = function (code) {
+	var port = make_string_output_port();
+	var savedOut = current_output_port_obj;
+	current_output_port_obj = port;
+	var result = null;
+	try {
+		var tokenizer = new Tokenizer(code);
+		while (tokenizer.value() !== '' && tokenizer.value() != null) {
+			var tree = parse(tokenizer);
+			if (isdefine_library(tree)) {
+				result = process_define_library(tree);
+			} else if (isimport_form(tree)) {
+				result = trampoline(eval_import(tree, theGlobalEnv, function (v) { return v; }));
+			} else {
+				result = trampoline(seval(tree, theGlobalEnv, function (v) { return v; }));
+			}
+		}
+	} catch (e) {
+		if (port.buffer) scheme_output(port.buffer);
+		current_output_port_obj = savedOut;
+		throw e;
+	}
+	current_output_port_obj = savedOut;
+	if (port.buffer) scheme_output(port.buffer);
+	return result;
+};
+
+// Node.js: .scm ファイルを読み込んで評価
+scheme_run_file = function (filePath, options) {
+	options = options || {};
+	if (!NODE_FS) throw 'scheme_run_file: requires Node.js';
+	var code = NODE_FS.readFileSync(filePath, 'utf8');
+	if (options.argv) scheme_set_command_line(options.argv);
+	return scheme_run(code);
+};
+
+// JavaScript からグローバル束縛を操作
+scheme_set_global = function (name, value) {
+	var v = (is_js_value(value) || value instanceof Symbol || value instanceof Pair
+		|| is_scheme_number(value) || typeof value === 'boolean' || value === null
+		|| typeof value === 'string') ? value : js_to_scheme(value);
+	theGlobalEnv.add(String(name), v);
+	return v;
+};
+
+scheme_get_global = function (name) {
+	return theGlobalEnv.find(new Symbol(String(name)));
+};
 // ------------------------------------------------------------------
 // ブラウザ連携: <script type="text/scheme"> ... </script> を自動実行
 //   ページ内の Scheme スクリプトブロックを上から順に評価する。
@@ -316,9 +366,20 @@ scheme_repl = function (prompt) {
 	}
 };
 
-// 直接実行時は REPL を起動: node schemInp.js
+// 直接実行時: 引数があれば .scm 実行、なければ REPL
 if (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) {
-	scheme_repl();
+	var cliArgs = process.argv.slice(2);
+	if (cliArgs.length === 0) {
+		scheme_repl();
+	} else {
+		try {
+			scheme_set_command_line(cliArgs);
+			scheme_run_file(require('path').resolve(cliArgs[0]), { argv: cliArgs });
+		} catch (e) {
+			scheme_output('error: ' + e + '\n');
+			process.exit(1);
+		}
+	}
 }
 
 // ブラウザから REPL API を利用できるようにグローバルへ公開
@@ -327,18 +388,38 @@ if (typeof window !== 'undefined') {
 	window.scheme_repl_eval = scheme_repl_eval;
 	window.scheme_input_complete = scheme_input_complete;
 	window.scheme_repl_ui = scheme_repl_ui;
+	window.scheme_debug_start = scheme_debug_start;
+	window.scheme_debug_trace = scheme_debug_trace;
 }
 
 // Node.js から利用できるようにエクスポート (ブラウザ環境では無視される)
 if (typeof module !== 'undefined' && module.exports) {
 	module.exports = {
 		scheme: scheme,
+		scheme_run: scheme_run,
+		scheme_run_file: scheme_run_file,
 		scheme_eval: scheme_eval,
 		repr: scheme_repr,
 		scheme_repl: scheme_repl,
 		scheme_repl_eval: scheme_repl_eval,
 		scheme_input_complete: scheme_input_complete,
-		scheme_repl_ui: scheme_repl_ui
+		scheme_repl_ui: scheme_repl_ui,
+		// JS 相互運用
+		toScheme: js_to_scheme,
+		fromScheme: scheme_to_js,
+		jsWrap: js_to_scheme,
+		jsUnwrap: scheme_to_js,
+		setCommandLineArguments: scheme_set_command_line,
+		setGlobal: scheme_set_global,
+		getGlobal: scheme_get_global,
+		JsValue: JsValue,
+		isJsValue: is_js_value,
+		// デバッガ
+		scheme_debug_start: scheme_debug_start,
+		scheme_debug_trace: scheme_debug_trace,
+		scheme_trace_walker: scheme_trace_walker,
+		SchemeDebugSession: SchemeDebugSession,
+		SchemeTraceWalker: SchemeTraceWalker
 	};
 }
 
