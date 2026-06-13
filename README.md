@@ -2,6 +2,12 @@
 
 JavaScript で実装した Scheme インタプリタです。
 
+[![npm version](https://img.shields.io/npm/v/scheme-js.svg)](https://www.npmjs.com/package/scheme-js)
+
+```bash
+npm install scheme-js
+```
+
 基本的な構文に加えて、**クロージャー**・**マクロ(`define-macro`)**・**継続(`call/cc`)** に対応しています。継続は CPS(継続渡しスタイル)+ トランポリンで実装しており、捕捉した継続を変数に保存して後から何度でも呼び出せる「完全な(ファーストクラスの)継続」です。
 
 ## 特長
@@ -669,6 +675,25 @@ node scripts/build.js
 node test/r5rs/test_r7rs.js
 node test/r5rs/test_r7rs_large.js
 node test/r5rs/test_r5rs_extra.js
+```
+
+## npm への公開（メンテナ向け）
+
+`scheme-js` は npm レジストリ向けに設定済みです。初回公開手順:
+
+```bash
+npm login                    # npmjs.com アカウントでログイン
+npm test                     # テスト + ビルド
+npm publish --access public  # prepublishOnly で再度テスト実行
+```
+
+GitHub Actions から公開する場合は、リポジトリ Secrets に `NPM_TOKEN`（npm の Automation トークン）を登録し、GitHub Release を publish するか、Actions の **Publish npm package** ワークフローを手動実行します。
+
+```bash
+# バージョン更新例
+npm version patch   # package.json の version を上げて git tag 作成
+git push && git push --tags
+# GitHub で Release を作成 → 自動 publish
 ```
 
 ## ライセンス

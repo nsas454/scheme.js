@@ -2,6 +2,8 @@
   "name": "scheme-js",
   "version": "2.1.0",
   "description": "Scheme interpreter for Node.js and browsers (R5RS / R7RS)",
+  "author": "Shuichi Yukimoto",
+  "license": "MIT",
   "main": "index.js",
   "bin": {
     "scheme-js": "./bin/scheme-js.js"
@@ -14,13 +16,24 @@
   "files": [
     "index.js",
     "bin/",
-    "dist/"
+    "dist/",
+    "LICENSE",
+    "README.md"
   ],
   "scripts": {
     "build": "node scripts/build.js",
     "prepare": "node scripts/build.js",
+    "prepublishOnly": "npm test",
     "test": "node scripts/build.js && node test/r5rs/test_r5rs_extra.js && node test/r5rs/test_syntax_rules.js && node test/r5rs/test_r7rs.js && node test/r5rs/test_r7rs_large.js && node test/js-interop/test_js_interop.js && node test/debugger/test_debugger.js && node test/sicp/test_sicp_exercises.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nsas454/scheme.js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nsas454/scheme.js/issues"
+  },
+  "homepage": "https://nsas454.github.io/scheme.js/",
   "keywords": [
     "scheme",
     "lisp",
@@ -28,10 +41,14 @@
     "r5rs",
     "r7rs",
     "repl",
-    "macro"
+    "macro",
+    "sicp",
+    "call/cc"
   ],
-  "license": "MIT",
   "engines": {
     "node": ">=14"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

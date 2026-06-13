@@ -1,1 +1,4 @@
 docs/qiita-scheme-js.md
+node_modules/
+*.tgz
+npm-debug.log*
