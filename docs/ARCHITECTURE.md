@@ -14,7 +14,7 @@
 
 ```
 scheme.js/
-├── index.js             # npm エントリ (require('scheme-js'))
+├── index.js             # npm エントリ (require('@nsas454/scheme-js'))
 ├── bin/scheme-js.js     # CLI
 ├── src/                 # ソース (編集はここ)
 │   ├── core.js          # Pair, リスト操作, トランポリン

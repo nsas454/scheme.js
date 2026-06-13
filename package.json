@@ -1,5 +1,5 @@
 {
-  "name": "scheme-js",
+  "name": "@nsas454/scheme-js",
   "version": "2.1.0",
   "description": "Scheme interpreter for Node.js and browsers (R5RS / R7RS)",
   "author": "Shuichi Yukimoto",

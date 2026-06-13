@@ -2,10 +2,10 @@
 
 JavaScript で実装した Scheme インタプリタです。
 
-[![npm version](https://img.shields.io/npm/v/scheme-js.svg)](https://www.npmjs.com/package/scheme-js)
+[![npm version](https://img.shields.io/npm/v/@nsas454/scheme-js.svg)](https://www.npmjs.com/package/@nsas454/scheme-js)
 
 ```bash
-npm install scheme-js
+npm install @nsas454/scheme-js
 ```
 
 基本的な構文に加えて、**クロージャー**・**マクロ(`define-macro`)**・**継続(`call/cc`)** に対応しています。継続は CPS(継続渡しスタイル)+ トランポリンで実装しており、捕捉した継続を変数に保存して後から何度でも呼び出せる「完全な(ファーストクラスの)継続」です。
@@ -22,7 +22,7 @@ npm install scheme-js
 
 ```
 scheme.js/
-├── index.js       # npm エントリ (require('scheme-js'))
+├── index.js       # npm エントリ (require('@nsas454/scheme-js'))
 ├── bin/scheme-js.js   # CLI
 ├── src/           # ソース (編集はここ)
 │   ├── parser.js      字句解析・S式パース
@@ -59,7 +59,7 @@ npm test                # ビルド + 全テスト
 ### 0. npm パッケージとして使う
 
 ```bash
-npm install scheme-js
+npm install @nsas454/scheme-js
 ```
 
 ```js
@@ -68,7 +68,7 @@ const {
   toScheme, fromScheme,
   setGlobal, getGlobal,
   setCommandLineArguments
-} = require('scheme-js');
+} = require('@nsas454/scheme-js');
 
 console.log(scheme('(+ 1 2 3)'));           // 6
 scheme_run('(display "hello\\n")');          // display 出力 + 例外時 throw
@@ -88,7 +88,7 @@ double(21);                                 // 42
 グローバルインストール後:
 
 ```bash
-npm install -g scheme-js
+npm install -g @nsas454/scheme-js
 scheme-js examples/hello.scm
 scheme-js -e "(display (+ 1 2))"    # => 3
 scheme-js                           # 対話 REPL
@@ -149,7 +149,7 @@ node bin/scheme-js.js examples/hello.scm
 **JavaScript API**:
 
 ```js
-const { scheme_debug_start, scheme_debug_trace, scheme_trace_walker } = require('scheme-js');
+const { scheme_debug_start, scheme_debug_trace, scheme_trace_walker } = require('@nsas454/scheme-js');
 
 // ステップ実行
 const sess = scheme_debug_start('(+ 1 2)');
@@ -265,7 +265,7 @@ node scripts/record-sicp-gif.mjs
 ### 4. Node.js から使う
 
 ```js
-const { scheme, repr } = require('scheme-js');
+const { scheme, repr } = require('@nsas454/scheme-js');
 // またはローカル clone: require('./index.js')
 
 console.log(scheme('(+ 1 2 3)'));                  // 6
@@ -679,7 +679,7 @@ node test/r5rs/test_r5rs_extra.js
 
 ## npm への公開（メンテナ向け）
 
-`scheme-js` は npm レジストリ向けに設定済みです。初回公開手順:
+`@nsas454/scheme-js` は npm レジストリ向けに設定済みです（グローバル名 `scheme-js` は既存パッケージと類似のためスコープ付き）。初回公開手順:
 
 ```bash
 npm login                    # npmjs.com アカウントでログイン

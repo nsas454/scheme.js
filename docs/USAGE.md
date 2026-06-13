@@ -1,6 +1,6 @@
 # scheme.js 使い方ガイド
 
-このドキュメントでは、scheme.js / **scheme-js** npm パッケージの具体的な使い方を説明します。アーキテクチャやモジュール構成は [ARCHITECTURE.md](ARCHITECTURE.md) を参照してください。
+このドキュメントでは、scheme.js / **@nsas454/scheme-js** npm パッケージの具体的な使い方を説明します。アーキテクチャやモジュール構成は [ARCHITECTURE.md](ARCHITECTURE.md) を参照してください。
 
 ---
 
@@ -24,13 +24,13 @@
 ### npm からインストール（利用者向け）
 
 ```bash
-npm install scheme-js
+npm install @nsas454/scheme-js
 ```
 
 グローバル CLI も使う場合:
 
 ```bash
-npm install -g scheme-js
+npm install -g @nsas454/scheme-js
 scheme-js --help
 ```
 
@@ -55,7 +55,7 @@ node scripts/build.js   # src/ → dist/schemInp.js, dist/r7rs_large.js
 
 ## 2. Node.js / npm API
 
-`require('scheme-js')` で次の関数が使えます。
+`require('@nsas454/scheme-js')` で次の関数が使えます。
 
 ### 評価系
 
@@ -68,7 +68,7 @@ node scripts/build.js   # src/ → dist/schemInp.js, dist/r7rs_large.js
 | `repr(value, writeMode?)` | Scheme 値を文字列化（`writeMode` 真で `write` 形式） |
 
 ```js
-const S = require('scheme-js');
+const S = require('@nsas454/scheme-js');
 
 // 基本的な評価
 console.log(S.scheme('(+ 1 2 3)'));                    // 6 (exact 整数)
@@ -161,7 +161,7 @@ R7RS の process-context ライブラリを import します。
 CLI 実行前に Node API で上書きする場合:
 
 ```js
-const S = require('scheme-js');
+const S = require('@nsas454/scheme-js');
 S.setCommandLineArguments(['my.scm', 'foo', 'bar']);
 S.scheme('(import (scheme process-context)) (command-line)');
 ```
@@ -247,7 +247,7 @@ node dist/schemInp.js          # 第1引数を .scm として実行
 ```bash
 scheme-js
 # または
-node -e "require('scheme-js').scheme_repl()"
+node -e "require('@nsas454/scheme-js').scheme_repl()"
 ```
 
 ```
@@ -363,7 +363,7 @@ scheme.js REPL (Ctrl-D で終了)
 #### JS オブジェクトを Scheme に渡す
 
 ```js
-const S = require('scheme-js');
+const S = require('@nsas454/scheme-js');
 
 S.setGlobal('config', { host: 'localhost', port: 8080 });
 
@@ -420,7 +420,7 @@ console.log(add(10, 32));   // 42
 ### 7.2 ライブステップ（JavaScript API）
 
 ```js
-const S = require('scheme-js');
+const S = require('@nsas454/scheme-js');
 
 const sess = S.scheme_debug_start('(+ 1 2)');
 sess.start();
