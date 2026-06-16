@@ -1,6 +1,8 @@
 # scheme.js 使い方ガイド
 
-このドキュメントでは、scheme.js / **@nsas454/scheme-js** npm パッケージの具体的な使い方を説明します。アーキテクチャやモジュール構成は [ARCHITECTURE.md](ARCHITECTURE.md) を参照してください。
+**Languages:** [English](../en/USAGE.md) · [日本語](USAGE.md)
+
+このドキュメントでは、scheme.js / **@nsas454/scheme-js** npm パッケージの具体的な使い方を説明します。アーキテクチャやモジュール構成は [ARCHITECTURE.md](ARCHITECTURE.md)（[English](../en/ARCHITECTURE.md)）を参照してください。
 
 ---
 
@@ -622,4 +624,5 @@ node test/js-interop/test_js_interop.js
 ## 関連ドキュメント
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — ディレクトリ構成・モジュール依存・ビルド
-- [../README.md](../README.md) — 対応構文一覧・コード例・R5RS/R7RS 対応状況
+- [README.md](../../README.md) — 対応構文一覧・コード例・R5RS/R7RS 対応状況（[English](../../README.en.md)）
+- [README.md](../README.md) — ドキュメント一覧（en / ja）

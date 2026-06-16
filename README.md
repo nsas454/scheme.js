@@ -1,5 +1,7 @@
 # scheme.js
 
+**Languages:** [English](README.en.md) · [日本語](README.md)
+
 JavaScript で実装した Scheme インタプリタです。
 
 [![npm version](https://img.shields.io/npm/v/@nsas454/scheme-js.svg)](https://www.npmjs.com/package/@nsas454/scheme-js)
@@ -40,10 +42,10 @@ scheme.js/
 ├── sicp/          # SICP 演習カタログ (exercises.js)
 ├── index.html     # GitHub Pages トップ (デモへのリンク)
 ├── test/          # テスト (r5rs / js-interop / debugger)
-└── docs/          # ドキュメント (USAGE.md, ARCHITECTURE.md)
+└── docs/          # ドキュメント (docs/ja, docs/en)
 ```
 
-詳細な使い方は **[docs/USAGE.md](docs/USAGE.md)** を参照してください。アーキテクチャは [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) です。
+詳細な使い方は **[docs/ja/USAGE.md](docs/ja/USAGE.md)**（[English](docs/en/USAGE.md)）を参照してください。アーキテクチャは [docs/ja/ARCHITECTURE.md](docs/ja/ARCHITECTURE.md)（[English](docs/en/ARCHITECTURE.md)）です。ドキュメント一覧は [docs/README.md](docs/README.md)。
 
 ### ビルド
 
@@ -54,7 +56,7 @@ npm test                # ビルド + 全テスト
 
 ## 使い方
 
-> **詳細ガイド:** [docs/USAGE.md](docs/USAGE.md) に npm / CLI / ブラウザ / REPL / JS 連携 / デバッガの操作手順をまとめています。以下はクイックリファレンスです。
+> **詳細ガイド:** [docs/ja/USAGE.md](docs/ja/USAGE.md)（[English](docs/en/USAGE.md)）に npm / CLI / ブラウザ / REPL / JS 連携 / デバッガの操作手順をまとめています。以下はクイックリファレンスです。
 
 ### 0. npm パッケージとして使う
 

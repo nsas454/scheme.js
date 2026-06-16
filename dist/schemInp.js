@@ -4346,24 +4346,33 @@ var _callback_ = function (readystatechange) {
 	}
 };
 
-scheme = function (code) {
+// 1 式 (AST) を評価する
+eval_scheme_tree = function (tree) {
+	if (isdefine_library(tree)) {
+		return process_define_library(tree);
+	}
+	if (isimport_form(tree)) {
+		return trampoline(eval_import(tree, theGlobalEnv, function (v) { return v; }));
+	}
+	return trampoline(seval(tree, theGlobalEnv, function (v) { return v; }));
+};
+
+// ソース文字列内の式を順に評価し、最後の結果を返す
+eval_scheme_code = function (code) {
 	var tokenizer = new Tokenizer(code);
 	var result = null;
-	try {
-		while (tokenizer.value() !== "" && tokenizer.value() != null) {
-			var tree = parse(tokenizer);
-			if (isdefine_library(tree)) {
-				result = process_define_library(tree);
-			} else if (isimport_form(tree)) {
-				result = trampoline(eval_import(tree, theGlobalEnv, function (v) { return v; }));
-			} else {
-				result = trampoline(seval(tree, theGlobalEnv, function (v) { return v; }));
-			}
-		}
-	} catch (e) {
-		result = e;
+	while (tokenizer.value() !== '' && tokenizer.value() != null) {
+		result = eval_scheme_tree(parse(tokenizer));
 	}
 	return result;
+};
+
+scheme = function (code) {
+	try {
+		return eval_scheme_code(code);
+	} catch (e) {
+		return e;
+	}
 };
 
 // 評価して値を返す。エラー時は例外を投げ、display 出力は stdout へ流す。
@@ -4371,27 +4380,16 @@ scheme_run = function (code) {
 	var port = make_string_output_port();
 	var savedOut = current_output_port_obj;
 	current_output_port_obj = port;
-	var result = null;
 	try {
-		var tokenizer = new Tokenizer(code);
-		while (tokenizer.value() !== '' && tokenizer.value() != null) {
-			var tree = parse(tokenizer);
-			if (isdefine_library(tree)) {
-				result = process_define_library(tree);
-			} else if (isimport_form(tree)) {
-				result = trampoline(eval_import(tree, theGlobalEnv, function (v) { return v; }));
-			} else {
-				result = trampoline(seval(tree, theGlobalEnv, function (v) { return v; }));
-			}
-		}
+		var result = eval_scheme_code(code);
+		if (port.buffer) scheme_output(port.buffer);
+		return result;
 	} catch (e) {
 		if (port.buffer) scheme_output(port.buffer);
-		current_output_port_obj = savedOut;
 		throw e;
+	} finally {
+		current_output_port_obj = savedOut;
 	}
-	current_output_port_obj = savedOut;
-	if (port.buffer) scheme_output(port.buffer);
-	return result;
 };
 
 // Node.js: .scm ファイルを読み込んで評価
@@ -4492,13 +4490,8 @@ scheme_repl_eval = function (code) {
 	var port = make_string_output_port();
 	var savedOut = current_output_port_obj;
 	current_output_port_obj = port;
-	var result = null;
 	try {
-		var tokenizer = new Tokenizer(code);
-		while (tokenizer.value() !== '' && tokenizer.value() != null) {
-			var tree = parse(tokenizer);
-			result = trampoline(seval(tree, theGlobalEnv, function (v) { return v; }));
-		}
+		var result = eval_scheme_code(code);
 		return { ok: true, value: result, output: port.buffer, error: null };
 	} catch (e) {
 		return { ok: false, value: null, output: port.buffer, error: String(e) };

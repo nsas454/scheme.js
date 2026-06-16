@@ -1,12 +1,15 @@
 # scheme.js アーキテクチャ
 
+**Languages:** [English](../en/ARCHITECTURE.md) · [日本語](ARCHITECTURE.md)
+
 ## ドキュメント
 
 | ファイル | 内容 |
 | --- | --- |
-| [USAGE.md](USAGE.md) | **使い方ガイド**（npm / CLI / ブラウザ / REPL / JS 連携 / デバッガ） |
+| [USAGE.md](USAGE.md) | **使い方ガイド**（[English](../en/USAGE.md)） |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 本ファイル（構成・ビルド・モジュール依存） |
-| [../README.md](../README.md) | 概要・対応機能一覧・コード例 |
+| [README.md](../../README.md) | 概要・対応機能一覧・コード例（[English](../../README.en.md)） |
+| [README.md](../README.md) | ドキュメント一覧（en / ja） |
 
 ---
 
@@ -44,7 +47,7 @@ scheme.js/
 ├── scripts/
 │   ├── build.js         # src → dist 結合
 │   └── extract.js       # 旧単一ファイルからの分割 (参考用)
-└── docs/                # ドキュメント
+└── docs/                # Documentation (ja/, en/)
 ```
 
 ---
@@ -99,7 +102,7 @@ core → env → continuations → primitives → numbers → io
 
 - **データ**（実行時リスト）は `Pair`、**コード**（AST）は `Array`
 - マクロ展開は `eval_application` 内で行い、展開結果を再び `seval` へ
-- デバッガは `seval` 入口と `s_apply` でイベントを記録（[USAGE.md §7](USAGE.md#7-ステップ実行デバッガ)）
+- デバッガは `seval` 入口と `s_apply` でイベントを記録（[USAGE.md §7](USAGE.md#7-ステップ実行デバッガ) / [English](../en/USAGE.md#7-step-execution--debugger)）
 
 ---
 
@@ -133,4 +136,4 @@ CPS 評価器 `seval` / `s_apply` にフックし、式ごとの **eval / return
 
 停止時は `resumeState` に `{ exp, env, k }` を保存し、再開時に `seval` を継続します（CPS 継続 `k` を保持する方式）。
 
-操作の詳細・ウォークスルー例は [USAGE.md §7](USAGE.md#7-ステップ実行デバッガ) を参照してください。
+操作の詳細・ウォークスルー例は [USAGE.md §7](USAGE.md#7-ステップ実行デバッガ)（[English](../en/USAGE.md#7-step-execution--debugger)）を参照してください。
